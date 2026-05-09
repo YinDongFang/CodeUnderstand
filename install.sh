@@ -2,6 +2,8 @@
 
 # 初始化脚本
 
+cd ~
+
 # 创建目录
 mkdir -p ~/CodeUnderstand/projects
 mkdir -p ~/CodeUnderstand/output
@@ -13,12 +15,20 @@ export GITLAB_TOKEN=glpat-715OYKqh4csG_JXaCKTVjW86MQp1OmQH.01.0w02nysxy
 wget -O /opt/devenv/sync_config.py "http://118.196.99.121:8000/public/%E5%88%9D%E5%A7%8B%E5%8C%96%E8%84%9A%E6%9C%AC/sync_config.py"
 python3 /opt/devenv/sync_config.py CodeUnderstand
 
-# 下载脚本
+# 下载仓库加载脚本
 wget -O ~/CodeUnderstand/download.sh https://gh-proxy.org/https://raw.githubusercontent.com/YinDongFang/CodeUnderstand/refs/heads/main/download.sh
+
+# 安装pnpm
+npm install -g pnpm
 
 # 安装smux
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/ShawnPana/smux/main/install.sh | bash
 source ~/.bashrc
+
+# 安装skill
+git clone https://gh-proxy.org/https://github.com/ShawnPana/smux.git ~/CodeUnderstand/smux
+cd ~/CodeUnderstand/agent
+pnpm dlx skills add ../smux -a claude-code --copy -y
 
 # 安装打包系统依赖包
 python3 -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
