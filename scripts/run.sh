@@ -2,7 +2,7 @@
 set -euo pipefail
 
 target="${1:?用法: $0 <target>}"
-root="$(cd "$(dirname "$0")" && pwd)"
+root="$(cd "$(dirname "$0")/../" && pwd)"
 
 echo "root: $root"
 echo "target: $target"
