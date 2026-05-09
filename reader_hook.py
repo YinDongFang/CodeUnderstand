@@ -9,7 +9,7 @@ Configure in the Reader project .claude/settings.json:
 
 import sys
 
-from relay_stop import forward_last_assistant_to_pane
+from relay_stop import relay_stop_forward
 
 if __name__ == "__main__":
-    sys.exit(forward_last_assistant_to_pane("learner"))
+    sys.exit(relay_stop_forward("learner"))

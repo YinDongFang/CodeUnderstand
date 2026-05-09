@@ -23,7 +23,7 @@ else
 fi
 
 # 确保 projects 目录存在
-PROJECTS_DIR="~/CodeUnderstand/projects"
+PROJECTS_DIR="$HOME/CodeUnderstand/projects"
 mkdir -p "$PROJECTS_DIR"
 
 # ZIP 文件保存路径

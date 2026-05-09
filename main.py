@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 Launch learner + reader Claude agents in one tmux session (two panes), using
-tmux-bridge (smux) to cd into each workspace, start claude, then send a preset
-prompt into the learner pane.
+tmux-bridge (smux) to cd into each workspace, start claude, then inject the
+reader 仓库的 README.md 全文到 Learner 并提示开始提问。
+
+Learner 目录固定为 ~/CodeUnderstand/agent；Reader 目录为 ~/CodeUnderstand/projects/<相对路径>。
 
 Stop hooks in each project should call learner_hook.py / reader_hook.py so that
 last_assistant_message is relayed to the other pane via tmux-bridge.
@@ -22,6 +24,10 @@ SESSION_NAME = "agent-loop"
 PANE_LEARNER = "learner"
 PANE_READER = "reader"
 
+LEARNER_DIR = Path("~/CodeUnderstand/agent").expanduser()
+PROJECTS_ROOT = Path("~/CodeUnderstand/projects").expanduser()
+README_NAME = "README.md"
+
 
 def tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess:
     return subprocess.run(["tmux", *args], capture_output=True, text=True, check=check)
@@ -38,7 +44,7 @@ def _require_ok(proc: subprocess.CompletedProcess, what: str) -> None:
 
 
 def bridge_interact(label: str, text: str, *, read_lines: str = "40") -> None:
-    """One typed line + Enter with smux read-guard (read → type → read → keys)."""
+    """One typed block + Enter with smux read-guard (read → type → read → keys)."""
     _require_ok(bridge("read", label, read_lines), f"tmux-bridge read {label}")
     _require_ok(bridge("type", label, text), f"tmux-bridge type {label}")
     _require_ok(bridge("read", label, read_lines), f"tmux-bridge read {label} (after type)")
@@ -53,6 +59,39 @@ def shell_cd_command(path: Path) -> str:
     return "cd " + shlex.quote(str(path.resolve()))
 
 
+def resolve_reader_dir(reader_rel: str) -> Path:
+    rel = reader_rel.strip().replace("\\", "/").strip("/")
+    if not rel or rel == ".":
+        raise ValueError("Reader 相对路径不能为空")
+    if rel.startswith("..") or "/../" in f"/{rel}/":
+        raise ValueError("Reader 相对路径不允许包含 '..'")
+    root = PROJECTS_ROOT.expanduser().resolve()
+    reader_dir = (root / rel).resolve()
+    try:
+        reader_dir.relative_to(root)
+    except ValueError as e:
+        raise ValueError(f"Reader 路径必须位于 {root} 之下") from e
+    return reader_dir
+
+
+def load_readme_for_learner(reader_dir: Path) -> str:
+    readme_path = reader_dir / README_NAME
+    if not readme_path.is_file():
+        raise FileNotFoundError(f"未找到 {readme_path}，请在 Reader 仓库根目录放置 {README_NAME}")
+    return readme_path.read_text(encoding="utf-8")
+
+
+def build_learner_readme_prompt(reader_dir: Path, readme_body: str) -> str:
+    return (
+        "下面是目标仓库（Reader 侧）根目录中的 README.md 文档全文。"
+        "文件名：README.md。\n\n"
+        "----- README.md -----\n"
+        f"{readme_body.rstrip()}\n"
+        "----- 结束 -----\n\n"
+        "请先阅读以上内容，然后向 Reader 开始你的第一个提问（按你在 CLAUDE.md 中的角色与流程执行）。"
+    )
+
+
 def setup_session(
     *,
     session: str,
@@ -61,7 +100,7 @@ def setup_session(
     learner_cmd: str,
     reader_cmd: str,
     startup_wait: float,
-    preset: str,
+    learner_seed: str,
 ) -> None:
     base = f"{session}:0"
     pane_learner = f"{base}.0"
@@ -83,8 +122,8 @@ def setup_session(
 
     time.sleep(startup_wait)
 
-    if preset.strip():
-        bridge_interact(PANE_LEARNER, preset.rstrip("\n"))
+    if learner_seed.strip():
+        bridge_interact(PANE_LEARNER, learner_seed.rstrip("\n"))
 
 
 def print_hook_hint(repo_root: Path) -> None:
@@ -116,49 +155,48 @@ def print_hook_hint(repo_root: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="tmux 双 pane + tmux-bridge 启动 Learner/Reader Claude")
     parser.add_argument(
-        "--learner-dir",
-        type=Path,
-        required=True,
-        help="Learner 侧工作目录（先 cd 再启动 claude）",
-    )
-    parser.add_argument(
-        "--reader-dir",
-        type=Path,
-        required=True,
-        help="Reader 侧工作目录",
-    )
-    parser.add_argument(
-        "--preset",
-        default="",
-        help="启动完成后注入到 Learner 窗格的第一条输入（不含自动换行以外的处理）",
-    )
-    parser.add_argument(
-        "--preset-file",
-        type=Path,
-        default=None,
-        help="从文件读取预设内容并注入 Learner（优先于 --preset）",
+        "reader_rel",
+        help="Reader 仓库相对 ~/CodeUnderstand/projects/ 的路径，例如 myrepo 或 org/myrepo",
     )
     parser.add_argument("--learner-cmd", default="claude", help="Learner 窗格中在 cd 之后执行的命令")
     parser.add_argument("--reader-cmd", default="claude", help="Reader 窗格中在 cd 之后执行的命令")
-    parser.add_argument("--startup-wait", type=float, default=5.0, help="启动 claude 后等待秒数再注入预设")
+    parser.add_argument(
+        "--startup-wait",
+        type=float,
+        default=5.0,
+        help="启动 claude 后等待秒数，再向 Learner 注入 readme 与开始提问说明",
+    )
     parser.add_argument("--session", default=SESSION_NAME, help="tmux 会话名")
     args = parser.parse_args()
 
-    preset = args.preset
-    if args.preset_file is not None:
-        preset = args.preset_file.read_text(encoding="utf-8")
+    learner_dir = LEARNER_DIR.expanduser().resolve()
+    reader_dir = resolve_reader_dir(args.reader_rel)
 
+    if not learner_dir.is_dir():
+        print(f"[launcher] Learner 目录不存在: {learner_dir}", file=sys.stderr)
+        sys.exit(1)
+    if not reader_dir.is_dir():
+        print(f"[launcher] Reader 目录不存在: {reader_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        readme_body = load_readme_for_learner(reader_dir)
+    except FileNotFoundError as e:
+        print(f"[launcher] {e}", file=sys.stderr)
+        sys.exit(1)
+
+    learner_seed = build_learner_readme_prompt(reader_dir, readme_body)
     repo_root = Path(__file__).resolve().parent
 
     try:
         setup_session(
             session=args.session,
-            learner_dir=args.learner_dir,
-            reader_dir=args.reader_dir,
+            learner_dir=learner_dir,
+            reader_dir=reader_dir,
             learner_cmd=args.learner_cmd,
             reader_cmd=args.reader_cmd,
             startup_wait=args.startup_wait,
-            preset=preset,
+            learner_seed=learner_seed,
         )
     except FileNotFoundError:
         print(
@@ -170,6 +208,8 @@ def main() -> None:
         print(f"[launcher] {e}", file=sys.stderr)
         sys.exit(1)
 
+    print(f"[launcher] Learner: {learner_dir}")
+    print(f"[launcher] Reader:  {reader_dir}（相对 projects: {args.reader_rel!r}）")
     print(f"[launcher] 会话 '{args.session}' 已创建（双 pane：{PANE_LEARNER} | {PANE_READER}）。")
     print(f"[launcher] 连接: tmux attach -t {args.session}")
     print_hook_hint(repo_root)
