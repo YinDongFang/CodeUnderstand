@@ -17,6 +17,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+import time
 
 MAX_USER_MESSAGES = 38
 
@@ -112,8 +113,11 @@ def relay_forward_from_data(dest_label: str, data: dict) -> int:
     read_lines = "30"
 
     _bridge(["read", dest_label, read_lines])
+    time.sleep(0.5)
     _bridge(["type", dest_label, text])
+    time.sleep(0.5)
     _bridge(["read", dest_label, read_lines])
+    time.sleep(0.5)
     _bridge(["keys", dest_label, "Enter"])
 
     return 0
