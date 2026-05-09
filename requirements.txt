@@ -1,0 +1,2 @@
+# 由 main.py、reader_hook.py 推断：仅使用 Python 标准库，无 pip 第三方依赖。
+# 建议运行环境：Python 3.10+（使用 asyncio.run / get_running_loop 等）。

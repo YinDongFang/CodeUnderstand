@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ~/CodeUnderstand/reader_hook.py"
+      }
+    ]
+  }
+}
