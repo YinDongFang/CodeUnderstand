@@ -2,8 +2,10 @@
   "hooks": {
     "Stop": [
       {
-        "type": "command",
-        "command": "python3 ~/CodeUnderstand/learner_hook.py"
+        "hooks": [{
+          "type": "command",
+          "command": "python3 ../relay_hook.py"
+        }]
       }
     ]
   }

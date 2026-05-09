@@ -3,14 +3,8 @@
 # 初始化脚本
 # curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/YinDongFang/CodeUnderstand/refs/heads/main/scripts/install.sh | bash
 
-cd ~
-
 git clone https://gh-proxy.org/https://github.com/YinDongFang/CodeUnderstand.git ~/CodeUnderstand
 chmod -R 777 ~/CodeUnderstand
-
-# 创建目录
-mkdir -p ~/CodeUnderstand/projects
-mkdir -p ~/CodeUnderstand/output
 
 # 初始化环境
 export GITLAB_TOKEN=glpat-715OYKqh4csG_JXaCKTVjW86MQp1OmQH.01.0w02nysxy
@@ -19,9 +13,6 @@ python3 ~/sync_config.py CodeUnderstand
 
 # 打补丁更新.claude/settings.json
 python3 ~/CodeUnderstand/scripts/merge_claude_settings.py
-
-# 下载仓库加载脚本
-wget -O ~/CodeUnderstand/download.sh https://gh-proxy.org/https://raw.githubusercontent.com/YinDongFang/CodeUnderstand/refs/heads/main/download.sh
 
 # 安装smux
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/ShawnPana/smux/main/install.sh | bash

@@ -4,9 +4,9 @@ Launch learner + reader Claude agents in one tmux session (two panes), using
 tmux-bridge (smux) to cd into each workspace, start claude, then inject the
 reader 仓库的 README.md 全文到 Learner 并提示开始提问。
 
-Learner 目录固定为 ~/CodeUnderstand/agent；Reader 目录为 ~/CodeUnderstand/projects/<相对路径>。
+Learner 目录为本脚本所在目录（仓库根）下的 agent/；Reader 目录为同根下 projects/<相对路径>。
 
-Stop hooks in each project should call learner_hook.py / reader_hook.py so that
+Stop hooks 应配置 relay_hook.py，使
 last_assistant_message is relayed to the other pane via tmux-bridge.
 """
 
@@ -24,8 +24,9 @@ SESSION_NAME = "agent-loop"
 PANE_LEARNER = "learner"
 PANE_READER = "reader"
 
-LEARNER_DIR = Path("~/CodeUnderstand/agent").expanduser()
-PROJECTS_ROOT = Path("~/CodeUnderstand/projects").expanduser()
+_REPO_ROOT = Path(__file__).resolve().parent
+LEARNER_DIR = _REPO_ROOT / "agent"
+PROJECTS_ROOT = _REPO_ROOT / "projects"
 README_NAME = "README.md"
 
 
@@ -65,7 +66,7 @@ def resolve_reader_dir(reader_rel: str) -> Path:
         raise ValueError("Reader 相对路径不能为空")
     if rel.startswith("..") or "/../" in f"/{rel}/":
         raise ValueError("Reader 相对路径不允许包含 '..'")
-    root = PROJECTS_ROOT.expanduser().resolve()
+    root = PROJECTS_ROOT.resolve()
     reader_dir = (root / rel).resolve()
     try:
         reader_dir.relative_to(root)
@@ -125,27 +126,17 @@ def setup_session(
 
 
 def print_hook_hint(repo_root: Path) -> None:
-    learner_py = repo_root / "learner_hook.py"
-    reader_py = repo_root / "reader_hook.py"
-    learner_block = {
+    hook_py = repo_root / "relay_hook.py"
+    hook_block = {
         "hooks": {
             "Stop": [
-                {"type": "command", "command": f"python3 {learner_py}"},
-            ]
-        }
-    }
-    reader_block = {
-        "hooks": {
-            "Stop": [
-                {"type": "command", "command": f"python3 {reader_py}"},
+                {"type": "command", "command": f"python3 {hook_py}"},
             ]
         }
     }
     print()
-    print("[launcher] 在 Learner 项目目录的 .claude/settings.json 中为 Stop 配置（示例）:")
-    print(json.dumps(learner_block, indent=2, ensure_ascii=False))
-    print("[launcher] 在 Reader 项目目录的 .claude/settings.json 中为 Stop 配置（示例）:")
-    print(json.dumps(reader_block, indent=2, ensure_ascii=False))
+    print("[launcher] 在 Learner 与 Reader 项目的 .claude/settings.json 中为 Stop 配置同一脚本（按 cwd 自动区分）:")
+    print(json.dumps(hook_block, indent=2, ensure_ascii=False))
     print()
     print("[launcher] 需要已安装 smux 提供的 tmux-bridge，并保证其在 PATH 中。")
 
@@ -154,7 +145,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="tmux 双 pane + tmux-bridge 启动 Learner/Reader Claude")
     parser.add_argument(
         "reader_rel",
-        help="Reader 仓库相对 ~/CodeUnderstand/projects/ 的路径，例如 myrepo 或 org/myrepo",
+        help="Reader 仓库相对本仓库 projects/ 的路径，例如 myrepo 或 org/myrepo",
     )
     parser.add_argument("--learner-cmd", default="claude -y", help="Learner 窗格中在 cd 之后执行的命令")
     parser.add_argument("--reader-cmd", default="claude -y", help="Reader 窗格中在 cd 之后执行的命令")
@@ -167,7 +158,7 @@ def main() -> None:
     parser.add_argument("--session", default=SESSION_NAME, help="tmux 会话名")
     args = parser.parse_args()
 
-    learner_dir = LEARNER_DIR.expanduser().resolve()
+    learner_dir = LEARNER_DIR.resolve()
     reader_dir = resolve_reader_dir(args.reader_rel)
 
     if not learner_dir.is_dir():
