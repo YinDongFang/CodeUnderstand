@@ -28,8 +28,7 @@ def merge(base: object, overlay: object) -> object:
 
 
 def main() -> int:
-    cwd = Path.cwd()
-    overlay_path = cwd / "claude.settings.json"
+    overlay_path = Path.home() / "CodeUnderstand" / "scripts" / "claude.settings.json"
     user_path = Path.home() / ".claude" / "settings.json"
 
     if not overlay_path.is_file():
