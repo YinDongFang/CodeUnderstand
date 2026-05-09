@@ -26,6 +26,7 @@ wget -O ~/CodeUnderstand/download.sh https://gh-proxy.org/https://raw.githubuser
 # 安装smux
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/ShawnPana/smux/main/install.sh | bash
 source ~/.bashrc
+sed -i '/^set -g pane-border-indicators arrows$/d' ~/.smux/tmux.conf
 
 # 安装打包系统依赖包
 python3 -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple

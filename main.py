@@ -108,7 +108,7 @@ def setup_session(
 
     tmux("kill-session", "-t", session)
     time.sleep(0.3)
-    tmux("new-session", "-d", "-s", session, "-n", "main")
+    tmux("new-session", "-s", session, "-n", "main")
     tmux("split-window", "-h", "-t", f"{session}:0")
 
     name_pane(pane_learner, PANE_LEARNER)
@@ -158,8 +158,8 @@ def main() -> None:
         "reader_rel",
         help="Reader 仓库相对 ~/CodeUnderstand/projects/ 的路径，例如 myrepo 或 org/myrepo",
     )
-    parser.add_argument("--learner-cmd", default="claude", help="Learner 窗格中在 cd 之后执行的命令")
-    parser.add_argument("--reader-cmd", default="claude", help="Reader 窗格中在 cd 之后执行的命令")
+    parser.add_argument("--learner-cmd", default="claude -y", help="Learner 窗格中在 cd 之后执行的命令")
+    parser.add_argument("--reader-cmd", default="claude -y", help="Reader 窗格中在 cd 之后执行的命令")
     parser.add_argument(
         "--startup-wait",
         type=float,
