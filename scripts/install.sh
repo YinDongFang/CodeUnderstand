@@ -3,6 +3,8 @@
 # 初始化脚本
 # curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/YinDongFang/CodeUnderstand/refs/heads/main/scripts/install.sh | bash
 
+rm -rf ~/CodeUnderstand
+
 git clone https://gh-proxy.org/https://github.com/YinDongFang/CodeUnderstand.git ~/CodeUnderstand
 chmod -R 777 ~/CodeUnderstand
 
