@@ -106,9 +106,7 @@ def setup_session(
     pane_learner = f"{base}.0"
     pane_reader = f"{base}.1"
 
-    tmux("kill-session", "-t", session)
     time.sleep(0.3)
-    tmux("new-session", "-s", session, "-n", "main")
     tmux("split-window", "-h", "-t", f"{session}:0")
 
     name_pane(pane_learner, PANE_LEARNER)
