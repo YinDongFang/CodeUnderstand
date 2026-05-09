@@ -14,8 +14,8 @@ mkdir -p ~/CodeUnderstand/output
 
 # 初始化环境
 export GITLAB_TOKEN=glpat-715OYKqh4csG_JXaCKTVjW86MQp1OmQH.01.0w02nysxy
-wget -O /opt/devenv/sync_config.py "http://118.196.99.121:8000/public/%E5%88%9D%E5%A7%8B%E5%8C%96%E8%84%9A%E6%9C%AC/sync_config.py"
-python3 /opt/devenv/sync_config.py CodeUnderstand
+sudo wget -O /opt/devenv/sync_config.py "http://118.196.99.121:8000/public/%E5%88%9D%E5%A7%8B%E5%8C%96%E8%84%9A%E6%9C%AC/sync_config.py"
+sudo python3 /opt/devenv/sync_config.py CodeUnderstand
 
 # 打补丁更新.claude/settings.json
 python3 ~/CodeUnderstand/scripts/merge_claude_settings.py
