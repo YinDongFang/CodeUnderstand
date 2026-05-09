@@ -26,7 +26,7 @@ PANE_READER = "reader"
 
 _REPO_ROOT = Path(__file__).resolve().parent
 LEARNER_DIR = _REPO_ROOT / "agent"
-PROJECTS_ROOT = _REPO_ROOT / "projects"
+PROJECTS_ROOT = Path.home() / "projects"
 README_NAME = "README.md"
 
 
@@ -147,12 +147,12 @@ def main() -> None:
         "reader_rel",
         help="Reader 仓库相对本仓库 projects/ 的路径，例如 myrepo 或 org/myrepo",
     )
-    parser.add_argument("--learner-cmd", default="claude --permission-mode auto", help="Learner 窗格中在 cd 之后执行的命令")
-    parser.add_argument("--reader-cmd", default="claude --permission-mode auto", help="Reader 窗格中在 cd 之后执行的命令")
+    parser.add_argument("--learner-cmd", default="claude", help="Learner 窗格中在 cd 之后执行的命令")
+    parser.add_argument("--reader-cmd", default="claude", help="Reader 窗格中在 cd 之后执行的命令")
     parser.add_argument(
         "--startup-wait",
         type=float,
-        default=10.0,
+        default=5.0,
         help="启动 claude 后等待秒数，再向 Learner 注入 readme 与开始提问说明",
     )
     parser.add_argument("--session", default=SESSION_NAME, help="tmux 会话名")

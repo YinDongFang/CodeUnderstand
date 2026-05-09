@@ -8,5 +8,9 @@
         }]
       }
     ]
+  },
+  "skipAutoPermissionPrompt": true,
+  "permissions": {
+    "defaultMode": "auto"
   }
 }
