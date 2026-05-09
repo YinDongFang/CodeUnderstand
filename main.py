@@ -152,7 +152,7 @@ def main() -> None:
     parser.add_argument(
         "--startup-wait",
         type=float,
-        default=5.0,
+        default=10.0,
         help="启动 claude 后等待秒数，再向 Learner 注入 readme 与开始提问说明",
     )
     parser.add_argument("--session", default=SESSION_NAME, help="tmux 会话名")
