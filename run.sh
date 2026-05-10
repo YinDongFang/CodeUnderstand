@@ -68,6 +68,15 @@ if ! ln -s "$TARGET_PATH" "$AGENT_TARGET_LINK"; then
 fi
 trap cleanup_agent_target_link EXIT
 
+# --- 步骤 2b: 放宽目录权限，避免 claude 因权限无法读软链目标 ---
+echo "[run.sh][debug][步骤2b] 放宽权限"
+if ! chmod -R 777 "$AGENT_DIR" 2>/dev/null; then
+  echo "[run.sh][debug][步骤2b] 警告: chmod agent 目录未成功（可忽略于部分环境）" >&2
+fi
+if ! chmod -R 777 "$PROJECTS_DIR" 2>/dev/null; then
+  echo "[run.sh][debug][步骤2b] 警告: chmod projects 父目录未成功（可忽略于部分环境）" >&2
+fi
+
 # --- 步骤 3: agent 目录生成第一个问题 ---
 echo "[run.sh][debug][步骤3] cd ${AGENT_DIR}"
 cd "$AGENT_DIR" || { echo "[run.sh][debug][步骤3] 无法进入 agent 目录，任务中断" >&2; exit 1; }
