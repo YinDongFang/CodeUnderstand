@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 初始化脚本
-# curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/YinDongFang/CodeUnderstand/refs/heads/main/scripts/install.sh | bash
+# curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/YinDongFang/CodeUnderstand/refs/heads/main/install.sh | bash
 
 rm -rf ~/CodeUnderstand
 
@@ -14,14 +14,6 @@ wget -O ~/sync_config.py "http://118.196.99.121:8000/public/%E5%88%9D%E5%A7%8B%E
 python3 -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 python3 -m pip install chardet flask  -i https://pypi.tuna.tsinghua.edu.cn/simple
 python3 ~/sync_config.py CodeUnderstand
-
-# 打补丁更新.claude/settings.json
-python3 ~/CodeUnderstand/scripts/merge_claude_settings.py
-
-# 安装smux
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/ShawnPana/smux/main/install.sh | bash
-source ~/.bashrc
-sed -i '/^set -g pane-border-indicators arrows$/d' ~/.smux/tmux.conf
 
 # 检查版本
 claude --version
