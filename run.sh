@@ -10,6 +10,8 @@ PROJECTS_DIR="${HOME}/projects"
 TURNS=38
 MAX_TARGET_ATTEMPTS=4
 RUN_FAILED=0
+# agent 侧通过此软链读代码库，避免跨路径权限问题（相对 agent 目录）
+AGENT_TARGET_LINK_NAME="repo"
 
 usage() {
   echo "用法: $0 <folder> [turns]" >&2
@@ -27,13 +29,21 @@ if [[ $# -ge 2 ]]; then
   if [[ "$2" =~ ^[0-9]+$ ]] && [[ "$2" -gt 0 ]]; then
     TURNS="$2"
   else
-    echo "[run.sh][debug] 错误: 第二参数 turns 必须是正整数: $2" >&2
+    echo "[run.sh][debug] 错误: 第二参数 turns 必须是正整数: $2，任务中断" >&2
     exit 1
   fi
 fi
 
 TARGET_PATH="${PROJECTS_DIR}/${FOLDER}"
 AGENT_DIR="${SCRIPT_DIR}/agent"
+AGENT_TARGET_LINK="${AGENT_DIR}/${AGENT_TARGET_LINK_NAME}"
+
+cleanup_agent_target_link() {
+  if [[ -n "${AGENT_TARGET_LINK:-}" && -L "$AGENT_TARGET_LINK" ]]; then
+    echo "[run.sh][debug] 移除 agent 下目标软链: ${AGENT_TARGET_LINK}"
+    rm -f "$AGENT_TARGET_LINK"
+  fi
+}
 
 echo "[run.sh][debug] SCRIPT_DIR=${SCRIPT_DIR}"
 echo "[run.sh][debug] FOLDER=${FOLDER} TURNS=${TURNS}"
@@ -42,21 +52,28 @@ echo "[run.sh][debug] AGENT_DIR=${AGENT_DIR}"
 
 # --- 步骤 1: 检查目标目录是否存在 ---
 if [[ ! -d "$TARGET_PATH" ]]; then
-  echo "[run.sh][debug][步骤1] 错误: 目标目录不存在: ${TARGET_PATH}" >&2
+  echo "[run.sh][debug][步骤1] 错误: 目标目录不存在: ${TARGET_PATH}，任务中断" >&2
   exit 1
 fi
-echo "[run.sh][debug][步骤1] 目标目录已就绪: ${TARGET_PATH}"
 
-# --- 步骤 2: 目标路径变量 ---
-echo "[run.sh][debug][步骤2] 目标路径已设为: ${TARGET_PATH}"
+# --- 步骤 2: 在 agent 目录下创建指向目标仓库的软链（供 Learner 读代码，避免跨路径权限）---
+echo "[run.sh][debug][步骤2] 目标软链: ${AGENT_TARGET_LINK} -> ${TARGET_PATH}"
+if [[ -e "$AGENT_TARGET_LINK" ]] || [[ -L "$AGENT_TARGET_LINK" ]]; then
+  echo "[run.sh][debug][步骤2] 已存在同名路径，删除后重新创建: ${AGENT_TARGET_LINK}"
+  rm -rf "$AGENT_TARGET_LINK"
+fi
+if ! ln -s "$TARGET_PATH" "$AGENT_TARGET_LINK"; then
+  echo "[run.sh][debug][步骤2] ln -s 失败，任务中断" >&2
+  exit 1
+fi
+trap cleanup_agent_target_link EXIT
 
 # --- 步骤 3: agent 目录生成第一个问题 ---
 echo "[run.sh][debug][步骤3] cd ${AGENT_DIR}"
-cd "$AGENT_DIR" || { echo "[run.sh][debug][步骤3] 无法进入 agent 目录" >&2; exit 1; }
+cd "$AGENT_DIR" || { echo "[run.sh][debug][步骤3] 无法进入 agent 目录，任务中断" >&2; exit 1; }
 
-STEP3_PROMPT="读取${TARGET_PATH}目录，生成第一个问题"
-echo "[run.sh][debug][步骤3] 运行: claude -p -n ${FOLDER} <提示词>"
-echo "[run.sh][debug][步骤3] 提示词: ${STEP3_PROMPT}"
+STEP3_PROMPT="读取 ${AGENT_TARGET_LINK} 目录（软链到目标仓库），生成第一个问题"
+echo "[run.sh][debug][步骤3] 运行: claude -p -n ${FOLDER} ${STEP3_PROMPT}"
 
 set +e
 QUESTION=$(claude -p -n "$FOLDER" "$STEP3_PROMPT" 2>&1)
@@ -66,15 +83,14 @@ set -e
 echo "[run.sh][debug][步骤3] --- claude 输出（第一个问题）开始 ---"
 printf '%s\n' "$QUESTION"
 echo "[run.sh][debug][步骤3] --- claude 输出结束 ---"
-echo "[run.sh][debug][步骤3] 退出码: ${STEP3_EXIT}"
 
 if [[ "$STEP3_EXIT" -ne 0 ]]; then
-  echo "[run.sh][debug][步骤3] claude 失败，退出" >&2
+  echo "[run.sh][debug][步骤3] claude 失败，任务中断" >&2
   exit 1
 fi
 
 if [[ -z "${QUESTION//[[:space:]]/}" ]]; then
-  echo "[run.sh][debug][步骤3] 错误: 第一个问题为空" >&2
+  echo "[run.sh][debug][步骤3] 错误: 第一个问题为空，任务中断" >&2
   exit 1
 fi
 
@@ -82,15 +98,15 @@ fi
 for ((i = 1; i <= TURNS; i++)); do
   echo "[run.sh][debug][步骤4] ========== 第 ${i}/${TURNS} 轮 =========="
 
-  echo "[run.sh][debug][步骤4.1] cd ${TARGET_PATH}"
-  cd "$TARGET_PATH" || { echo "[run.sh][debug][步骤4.1] 无法进入目标路径" >&2; RUN_FAILED=1; break; }
+  echo "[run.sh][debug][步骤4.1] cd 项目目录 ${TARGET_PATH}"
+  cd "$TARGET_PATH" || { echo "[run.sh][debug][步骤4.1] 无法进入项目目录" >&2; RUN_FAILED=1; break; }
 
-  # 4.2 目标路径执行 Reader，首轮无 -c，之后带 -c；失败重试共 3 次重试（最多 4 次尝试）
+  # 4.2 在真实仓库目录执行 Reader，首轮无 -c，之后带 -c；失败重试共 3 次重试（最多 4 次尝试）
   attempt=1
   success=0
   RESULT=""
   while [[ $attempt -le $MAX_TARGET_ATTEMPTS ]]; do
-    echo "[run.sh][debug][步骤4.2] 第 ${i} 轮，尝试 ${attempt}/${MAX_TARGET_ATTEMPTS}（首轮无 -c，之后带 -c）"
+    echo "[run.sh][debug][步骤4.2] 第 ${i} 轮，尝试 ${attempt}/${MAX_TARGET_ATTEMPTS}"
     set +e
     if [[ "$i" -eq 1 ]]; then
       RESULT=$(claude -p "$QUESTION" 2>&1)
@@ -103,7 +119,6 @@ for ((i = 1; i <= TURNS; i++)); do
     echo "[run.sh][debug][步骤4.2] --- Reader 输出开始 ---"
     printf '%s\n' "$RESULT"
     echo "[run.sh][debug][步骤4.2] --- Reader 输出结束 ---"
-    echo "[run.sh][debug][步骤4.2] 退出码: ${ROUND_EXIT}"
 
     if [[ "$ROUND_EXIT" -eq 0 ]]; then
       success=1
@@ -132,10 +147,9 @@ for ((i = 1; i <= TURNS; i++)); do
   echo "[run.sh][debug][步骤4.3] --- Learner 输出（下一问）开始 ---"
   printf '%s\n' "$NEXT_QUESTION"
   echo "[run.sh][debug][步骤4.3] --- Learner 输出结束 ---"
-  echo "[run.sh][debug][步骤4.3] 退出码: ${STEP43_EXIT}"
 
   if [[ "$STEP43_EXIT" -ne 0 ]]; then
-    echo "[run.sh][debug][步骤4.3] claude 失败，终止" >&2
+    echo "[run.sh][debug][步骤4.3] claude 失败" >&2
     RUN_FAILED=1
     break
   fi
@@ -151,12 +165,12 @@ for ((i = 1; i <= TURNS; i++)); do
 done
 
 if [[ "$RUN_FAILED" -ne 0 ]]; then
-  echo "[run.sh][debug] 流程未全部成功，跳过步骤 5（git 清理）" >&2
+  echo "[run.sh][debug] 流程未全部成功，任务中断" >&2
   exit 1
 fi
 
 # --- 步骤 5: 成功后清理 git ---
-echo "[run.sh][debug][步骤5] 全部轮次成功，进入目标路径: ${TARGET_PATH}"
+echo "[run.sh][debug][步骤5] 全部轮次成功，开始清理"
 cd "$TARGET_PATH" || exit 1
 
 if [[ -d .git ]]; then
@@ -175,4 +189,4 @@ else
   echo "[run.sh][debug][步骤5] 未找到 .git，跳过 reset 与删除"
 fi
 
-echo "[run.sh][debug] 全部步骤完成"
+echo "[run.sh][debug] 任务完成"
