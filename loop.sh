@@ -38,13 +38,10 @@ MAX_QUESTIONS=38
 RUN_FAILED=0
 
 QUESTIONS_FILE=""
-if [[ -f "${PWD}/questions/${REPO}.txt" ]]; then
-  QUESTIONS_FILE="${PWD}/questions/${REPO}.txt"
-elif [[ -f "${SCRIPT_DIR}/questions/${REPO}.txt" ]]; then
+if [[ -f "${SCRIPT_DIR}/questions/${REPO}.txt" ]]; then
   QUESTIONS_FILE="${SCRIPT_DIR}/questions/${REPO}.txt"
 else
-  loop_err "错误: 未找到问题列表文件 questions/${REPO}.txt"
-  loop_err "  已查找: ${PWD}/questions/${REPO}.txt 与 ${SCRIPT_DIR}/questions/${REPO}.txt"
+  loop_err "错误: 未找到问题列表文件 ${SCRIPT_DIR}/questions/${REPO}.txt"
   exit 1
 fi
 
