@@ -4,20 +4,23 @@
 # 依赖：bash、find、zip（Ubuntu 默认/预装常用）
 set -euo pipefail
 
+zip_out() { printf '[zip.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*"; }
+zip_err() { printf '[zip.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+
 usage() {
-  echo "用法: $0 <执行路径>" >&2
-  echo "或: EXEC_PATH=<路径> $0" >&2
+  zip_err "用法: $0 <执行路径>"
+  zip_err "或: EXEC_PATH=<路径> $0"
 }
 
 exec_path="${1:-${EXEC_PATH:-}}"
 if [[ -z "${exec_path}" ]]; then
   usage
-  echo "错误: 执行路径未找到" >&2
+  zip_err "错误: 执行路径未找到"
   exit 1
 fi
 
 if [[ ! -d "${exec_path}" ]]; then
-  echo "错误: 执行路径不存在: ${exec_path}" >&2
+  zip_err "错误: 执行路径不存在: ${exec_path}"
   exit 1
 fi
 
@@ -40,6 +43,6 @@ rm -f -- "${zip_path}"
     zip -q "${zip_filename}" -@
 )
 
-echo "压缩包已创建！"
-echo "zip_path=${zip_path}"
-echo "zip_filename=${zip_filename}"
+zip_out "压缩包已创建！"
+zip_out "zip_path=${zip_path}"
+zip_out "zip_filename=${zip_filename}"
