@@ -43,6 +43,7 @@ fi
 cd "${SCRIPT_DIR}"
 git reset --hard HEAD
 git pull
+chmod -R 777 "${SCRIPT_DIR}"
 
 TARGET_PATH="${PROJECTS_DIR}/${REPO}"
 run_out "解析: ${_GH_USER}/${REPO} @ ${BRANCH}"
