@@ -7,7 +7,8 @@
 #   1) 从 URL 解析 user/repo/branch（与 download.sh 一致）
 #   2) 目标目录 ~/projects/<repo> 不存在则调用 download.sh
 #   3) 从 ./questions/<repo>.txt 读取题目（同上路径），每行一题，忽略空行与 # 行；最多取 38 题，超出丢弃
-#   4) cd 到目标目录，按列表循环 claude：首轮 --output-format json 取 uuid；后续 -r uuid -c；每轮带重试
+#   4) cd 到目标目录，按列表循环 claude：首轮 --output-format json 取 session_id；后续 -r session_id -c；每轮带重试
+#   5) 成功后调用 clean.py <REPO> <SESSION_ID>，清理 ~/.claude/projects 中该会话 JSONL 的重复对话
 
 set -eu
 
@@ -194,5 +195,15 @@ if [[ -d .git ]]; then
 else
   echo "[run.sh] 未找到 .git，跳过清理"
 fi
+
+echo "[run.sh] 调用 clean.py 去重会话（target=${REPO} session=${SESSION_ID}）"
+if [[ ! -f "${SCRIPT_DIR}/clean.py" ]]; then
+  echo "[run.sh] 错误: 未找到 ${SCRIPT_DIR}/clean.py" >&2
+  exit 1
+fi
+python3 "${SCRIPT_DIR}/clean.py" "$REPO" "$SESSION_ID" || {
+  echo "[run.sh] clean.py 执行失败" >&2
+  exit 1
+}
 
 echo "[run.sh] 任务完成"
