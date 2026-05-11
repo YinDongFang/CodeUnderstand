@@ -6,7 +6,7 @@
 # 逻辑概要:
 #   1) 从 URL 解析 user/repo/branch（与 download.sh 一致）
 #   2) 目标目录 ~/projects/<repo> 不存在则调用 download.sh
-#   3) 从「当前工作目录」读取 <repo>.txt（若不存在则尝试脚本所在目录），每行一题，空行与 # 开头行忽略
+#   3) 从 ./questions/<repo>.txt 读取题目（先当前工作目录下的 questions/，再脚本同目录下的 questions/），每行一题，空行与 # 开头行忽略
 #   4) cd 到目标目录，按列表循环 claude：首轮 --output-format json 取 uuid；后续 -r uuid -c；每轮带重试
 
 set -eu
@@ -57,15 +57,15 @@ if [[ ! -d "$TARGET_PATH" ]]; then
   exit 1
 fi
 
-# --- 问题列表：<repo>.txt，先当前目录再脚本目录 ---
+# --- 问题列表：questions/<repo>.txt（先当前目录 ./questions，再脚本目录下 questions）---
 QUESTIONS_FILE=""
-if [[ -f "${PWD}/${REPO}.txt" ]]; then
-  QUESTIONS_FILE="${PWD}/${REPO}.txt"
-elif [[ -f "${SCRIPT_DIR}/${REPO}.txt" ]]; then
-  QUESTIONS_FILE="${SCRIPT_DIR}/${REPO}.txt"
+if [[ -f "${PWD}/questions/${REPO}.txt" ]]; then
+  QUESTIONS_FILE="${PWD}/questions/${REPO}.txt"
+elif [[ -f "${SCRIPT_DIR}/questions/${REPO}.txt" ]]; then
+  QUESTIONS_FILE="${SCRIPT_DIR}/questions/${REPO}.txt"
 else
-  echo "[run.sh] 错误: 未找到问题列表文件 ${REPO}.txt" >&2
-  echo "  已查找: ${PWD}/${REPO}.txt 与 ${SCRIPT_DIR}/${REPO}.txt" >&2
+  echo "[run.sh] 错误: 未找到问题列表文件 questions/${REPO}.txt" >&2
+  echo "  已查找: ${PWD}/questions/${REPO}.txt 与 ${SCRIPT_DIR}/questions/${REPO}.txt" >&2
   exit 1
 fi
 
