@@ -1,13 +1,18 @@
 """
 Claude Code 会话去重：单文件入口。
 
-通过命令行传入的 session_id（即主会话 .jsonl 文件名不含扩展名）在
-~/.claude/projects 下定位会话文件，检测重复用户提问并删除较晚出现的轮次。
+参数 target：在 ~/.claude/projects 下解析项目目录（以 `-projects-{target}` 结尾，
+不区分大小写；多个时取会话 .jsonl 最近修改的目录；无则试 `-home-{user}-projects-{target}`，
+user 由 USER / LOGNAME / USERNAME 或 getpass 推断）。
+
+参数 session_id：在该项目目录下处理 `{session_id}.jsonl`（可带或不带 .jsonl 后缀）。
 """
 
 import argparse
+import getpass
 import json
 import os
+from datetime import datetime
 from difflib import SequenceMatcher
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -15,6 +20,110 @@ from typing import Optional
 def get_projects_dir() -> str:
     """Claude Code 默认项目根目录 ~/.claude/projects。"""
     return os.path.join(os.path.expanduser("~"), ".claude", "projects")
+
+
+def infer_path_username() -> str:
+    """
+    用于拼 `-home-{user}-projects-...` 的用户名片段。
+    依次使用系统/Shell 自带的 USER、LOGNAME、USERNAME，再退回 getpass 与主目录名。
+    """
+    for key in ("USER", "LOGNAME", "USERNAME"):
+        v = os.environ.get(key, "").strip()
+        if v:
+            return v
+    try:
+        u = getpass.getuser()
+        if u:
+            return u
+    except Exception:
+        pass
+    home = os.path.expanduser("~")
+    base = os.path.basename(home.rstrip("/\\"))
+    return base or "user"
+
+
+def _latest_activity_mtime(project_dir: str) -> float:
+    """项目目录内顶层 .jsonl 的最新 mtime，用于在多个同名后缀目录中选最近使用的。"""
+    try:
+        names = [
+            n
+            for n in os.listdir(project_dir)
+            if n.endswith(".jsonl")
+            and os.path.isfile(os.path.join(project_dir, n))
+        ]
+        if not names:
+            return 0.0
+        return max(os.path.getmtime(os.path.join(project_dir, n)) for n in names)
+    except OSError:
+        return 0.0
+
+
+def resolve_project_dir(projects_root: str, target: str) -> str:
+    """
+    解析项目目录：
+    1) 所有以 `-projects-{target}` 结尾的目录（路径名不区分大小写）；
+       仅一个则用之；多个则取其中会话 .jsonl 最近修改的目录。
+    2) 若无匹配，再尝试 `-home-{infer_path_username()}-projects-{target}`。
+    """
+    if not os.path.isdir(projects_root):
+        raise FileNotFoundError(f"Claude 项目目录不存在: {projects_root}")
+    suffix = f"-projects-{target}"
+    suffix_l = suffix.lower()
+    matches = [
+        os.path.join(projects_root, d)
+        for d in os.listdir(projects_root)
+        if d.lower().endswith(suffix_l)
+        and os.path.isdir(os.path.join(projects_root, d))
+    ]
+    if len(matches) >= 1:
+        if len(matches) == 1:
+            return matches[0]
+        return max(matches, key=_latest_activity_mtime)
+
+    user = infer_path_username()
+    slug = f"-home-{user}-projects-{target}"
+    exact = os.path.join(projects_root, slug)
+    if os.path.isdir(exact):
+        return exact
+
+    raise FileNotFoundError(
+        f"未找到项目目录：无路径以 {suffix!r} 结尾（不区分大小写），"
+        f"且不存在 {slug!r}。projects_root={projects_root!r}"
+    )
+
+
+def normalize_session_id(raw: str) -> str:
+    """去掉空白；若以 .jsonl 结尾则去掉扩展名。"""
+    s = (raw or "").strip()
+    if s.lower().endswith(".jsonl"):
+        s = s[:-6]
+    return s
+
+
+def resolve_session_jsonl(project_dir: str, session_id: str) -> str:
+    """项目目录下必须存在 `{session_id}.jsonl`。"""
+    sid = normalize_session_id(session_id)
+    if not sid:
+        raise FileNotFoundError("session_id 不能为空")
+    name = f"{sid}.jsonl"
+    path = os.path.join(project_dir, name)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"会话文件不存在: {path!r}（请在项目目录 {project_dir!r} 下确认 {name!r}）"
+        )
+    return path
+
+
+def collect_subagent_files_for_main(project_dir: str, main_jsonl_path: str) -> list:
+    stem = os.path.basename(main_jsonl_path)[:-6]
+    sub_dir = os.path.join(project_dir, stem, "subagents")
+    if not os.path.isdir(sub_dir):
+        return []
+    return [
+        os.path.join(sub_dir, sf)
+        for sf in sorted(os.listdir(sub_dir))
+        if sf.endswith(".jsonl")
+    ]
 
 
 def compute_later_duplicate_turn_indices(turns: list) -> list:
@@ -30,31 +139,29 @@ def compute_later_duplicate_turn_indices(turns: list) -> list:
     return sorted(to_delete)
 
 
-def run_dedupe_session(session_id: str) -> dict:
+def run_dedupe_session(target: str, session_id: str) -> dict:
     """
-    根据 session_id 在 ~/.claude/projects 下查找主会话 .jsonl 并删除重复轮次。
+    在 target 对应的项目目录下，对指定 session_id 的 JSONL 执行重复轮次删除。
 
     Returns:
         摘要 dict：路径、删除数量等。
     """
-    sid = (session_id or "").strip()
-    if not sid:
-        raise ValueError("session_id 不能为空")
-
-    found = find_session_by_id(sid)
-    main_file = found["main_file"]
-    sub_files = found["subagent_files"]
-    project_dir = found["parent_dir"]
+    projects_root = get_projects_dir()
+    project_dir = resolve_project_dir(projects_root, target)
+    main_file = resolve_session_jsonl(project_dir, session_id)
+    sub_files = collect_subagent_files_for_main(project_dir, main_file)
     parsed = parse_main_jsonl(main_file, sub_files)
     turn_indices = compute_later_duplicate_turn_indices(parsed.turns)
+    total_turns = len(parsed.turns)
     if not turn_indices:
         return {
             "ok": True,
             "message": "未检测到需删除的重复对话轮次",
             "project_dir": project_dir,
             "main_file": main_file,
-            "session_id": sid,
+            "session_id": normalize_session_id(session_id),
             "deleted": 0,
+            "total_turns": total_turns,
         }
     session_slug = os.path.basename(project_dir)
     ok = delete_turns(main_file, turn_indices, parsed)
@@ -65,10 +172,11 @@ def run_dedupe_session(session_id: str) -> dict:
         "message": f"已删除 {len(turn_indices)} 个重复轮次，剩余 {remaining} 轮",
         "project_dir": project_dir,
         "main_file": main_file,
-        "session_id": sid,
+        "session_id": normalize_session_id(session_id),
         "session_slug": session_slug,
         "deleted": len(turn_indices),
         "remaining_turns": remaining,
+        "total_turns": total_turns,
         "turn_indices": turn_indices,
     }
 
@@ -755,26 +863,35 @@ def delete_session_turns(
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(
-        description="根据 session_id 定位会话 JSONL 并清理其中的重复对话轮次"
+        description="按 target 定位项目目录，对指定 session 的 JSONL 清理重复对话轮次"
+    )
+    ap.add_argument(
+        "target",
+        help="用于匹配 ~/.claude/projects 下 *-projects-{target} 的项目目录名最后一段",
     )
     ap.add_argument(
         "session_id",
-        help="会话 ID：主会话文件名主名（不含 .jsonl），与 ~/.claude/projects 下文件一致",
+        help="该目录下的会话文件名（UUID），对应 {session_id}.jsonl，可省略 .jsonl 后缀",
     )
     args = ap.parse_args()
+    target = (args.target or "").strip()
+    if not target:
+        ap.error("target 不能为空")
     session_id = (args.session_id or "").strip()
     if not session_id:
         ap.error("session_id 不能为空")
     try:
-        summary = run_dedupe_session(session_id)
-    except (FileNotFoundError, ValueError) as e:
+        summary = run_dedupe_session(target, session_id)
+    except FileNotFoundError as e:
         print(f"错误: {e}")
         raise SystemExit(1)
     except Exception as e:
         print(f"错误: {e}")
         raise SystemExit(1)
-    print(summary.get("message", ""))
+    print(f"总对话轮数: {summary.get('total_turns', 0)}")
     print(f"项目目录: {summary.get('project_dir', '')}")
+    print(f"session_id: {summary.get('session_id', '')}")
     print(f"会话文件: {summary.get('main_file', '')}")
+    print(summary.get("message", ""))
     if summary.get("deleted", 0):
         print(f"已删除轮次索引: {summary.get('turn_indices', [])}")
