@@ -1,0 +1,102 @@
+Where does the library build put the bundle and how is that different from running the example dev entry?
+
+The editor shell wires a bunch of panels around one canvas, what is the rough responsibility split between toolbar, left panel, right panel, and the middle pad?
+
+Why does the project wrap AntV G6 in its own module instead of importing G6 straight everywhere?
+
+What runtime pieces get hung off Vue as that dollar X thing and what do they carry?
+
+When the graph boots, which plugins always attach besides the optional minimap?
+
+In the big editor vue init, it finds the pad element by id inside init, is there a reason it does not use a vue ref on the pad child?
+
+The graph constructor passes a long node-control config block, does that override the defaults baked into the behavior file or merge with them?
+
+After the graph object is created, it assigns a dollar C and a dollar D bag on it, what reads dollar D first and what fields there matter for line drawing?
+
+The minimap setup mentions delegate versus keyShape and a display bug comment, what breaks if you flip that type back?
+
+When edit mode is set, what listeners get attached on the graph instance right after mode setup?
+
+The sketchpad wrapper mostly styles a fixed size white board and a hidden input, what user action on the outer box fires the bus event?
+
+The pad listens for a panel toggle bus message, what shape does that payload expect so boxStyle math does not go weird?
+
+That hidden input in the pad template, who shows it or writes into it during text edit flows?
+
+If both panels animate open, does the pad margin logic stack both sides or does one overwrite the other in panelStyle keys?
+
+Why stop double click on the inner pad div while the outer still handles dblclick, what bug is that trying to avoid?
+
+The custom G6 index file registers behaviors edges nodes then exports G6 with a dollar C config attached, what breaks if you import raw AntV G6 in a random vue file instead?
+
+The node-control behavior maps many graph events to handlers, which ones are about edges versus nodes at a glance?
+
+Inside node-control defaults, updateEdge is false for drag and shape control, what user visible symptom do you get if you turn that true on a heavy diagram?
+
+The behavior listens for editor:addNode, who emits that and what state does the behavior set right after?
+
+There is a time frame constant used in parts of node-control, what interaction does it throttle or debounce?
+
+The xfc bootstrap merges props into config for system storage infoPanel, what happens if you pass a bad tools prop shape, does it fall back to the factory function path?
+
+When disableTools and enableTools arrays are used, where does the filtering happen and what is the order of precedence?
+
+Materials can be a full array override or driven by enableMaterials flags, which path skips the default catalog entirely?
+
+After merge, the code mounts utils and config on Vue prototype, can two editors on one page share storage keys safely or does prefix need tweaking?
+
+The history modal pulls log from storage then previews each snapshot, why instantiate a fresh G6 graph in the preview box instead of reusing the main editor graph?
+
+When you pick a log row, what gets destroyed or recreated as you switch indexes?
+
+The revert button path, what graph API reloads the saved json and does it emit the same record events as normal edits?
+
+If preview never opened before, is the preview container always in the DOM or only after show, and does that affect first render timing?
+
+When the main editor fires editor:contextmenu, how does the menu vue pick up the payload and decide menu items from toolList?
+
+The right panel binds editorConfig from the graph dollar C bag, if a tool changes line dash there, how does that flow back into updateItem on the selected shape?
+
+Shortcuts bind in the parent editor vue, do they call graph methods directly or mostly emit bus or graph events?
+
+The parent listens for editor:getItem to fill currentItem, which other components consume currentItem props downstream?
+
+If you paste from clipboard state in the parent, what assumptions does paste make about ids and offsets so it does not collide?
+
+When undo log grows, is there a max size prop on the editor component and where is it enforced when pushing snapshots?
+
+You said record saves whole graph json each time, for large graphs does that risk localStorage quota and where could you trim without losing revert fidelity?
+
+If bus events get renamed but only half the listeners update, which user gestures would silently stop working first in a quick smoke test?
+
+The history preview uses stock AntV G6 while the main canvas uses the wrapped G6, could a custom node render differently in the small preview than on the main board?
+
+When props merge changes storage prefix at bootstrap but old keys already exist under the old prefix, does anything migrate or do you read empty logs until you clear site data?
+
+If shapeControlPoint updateEdge stays false but edgeLabel is true, where in the behavior stack does edge label hit testing live compared to node dragging?
+
+You mentioned minimap attaches only when navigator enable flag is true, if that flag flips at runtime without rebuild, is there a code path that adds minimap later or is it init only?
+
+For the pad outer dblclick bus emit, does anything in the editor parent listen and open a dialog, or is it reserved for future hooks?
+
+The graph fitView and padding are set at create time, if the window resizes does anything refit the graph or does width height stay whatever sketchpad measured on first init?
+
+When group nodes update through editor:setItem and the FIXME branch copies style from the first item only, what breaks if you try to recolor only one member of a group?
+
+If Mousetrap binds global shortcuts while focus is inside an iview input, which shortcuts might steal keys from typing and is there a guard?
+
+The XBackground plugin sits next to grid in the plugins array, does draw order depend on array order for how background paints under content?
+
+When switching from edit to preview mode, what behaviors drop off the modes list and can you still select items accidentally?
+
+If init runs twice because the parent remounts the editor component, does the old graph get destroyed cleanly or could listeners double fire?
+
+You pass plugins including minimap only when navigator config says yes, if navigator dom node is missing at init, what happens to minimap container query and does init throw?
+
+The log writer stores time plus save output, does revert replay events that bump log again or does it insert without a new history entry?
+
+When currentItem is empty and you open context menu from canvas, does menu still build from toolList or bail early?
+
+If props.materials is an empty array on purpose, does left panel render empty quietly or does downstream code assume at least one category exists?
+

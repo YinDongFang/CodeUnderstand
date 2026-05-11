@@ -40,6 +40,9 @@ else
   exit 1
 fi
 
+cd "${SCRIPT_DIR}"
+git pull
+
 TARGET_PATH="${PROJECTS_DIR}/${REPO}"
 run_out "解析: ${_GH_USER}/${REPO} @ ${BRANCH}"
 run_out "目标目录: ${TARGET_PATH}"
