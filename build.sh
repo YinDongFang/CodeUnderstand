@@ -5,14 +5,14 @@
 #   session  对应 ~/.claude/projects/<session>.jsonl 与 ~/.claude/projects/<session>/subagents/
 #
 # 环境变量（默认与 pack.sh 一致）: OUTPUTS_DIR, PROJECTS_DIR
-# 依赖: bash, cp, mkdir, jq, claude, shuf（可选 timeout）
+# 依赖: bash, cp, mkdir, jq, claude, shuf
 set -euo pipefail
 
 : "${OUTPUTS_DIR:=${HOME}/outputs}"
 : "${PROJECTS_DIR:=${HOME}/projects}"
 
-build_out() { printf '[build.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*"; }
-build_err() { printf '[build.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+build_out() { printf '[build.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+build_err() { printf '[build.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 usage() {
   build_err "用法: $0 <repo> <session>"
@@ -29,7 +29,7 @@ command -v jq >/dev/null 2>&1 || { build_err "错误: 需要 jq"; exit 1; }
 
 DIR="${OUTPUTS_DIR}/code-understand-${repo}"
 PROJECT_DIR="${PROJECTS_DIR}/${repo}"
-CLAUDE_PROJECTS="${HOME}/.claude/projects"
+CLAUDE_PROJECTS="${HOME}/.claude/projects/-home-${USER}-projects-${repo}"
 SESSION_FILE="${CLAUDE_PROJECTS}/${session}.jsonl"
 SA_SRC="${CLAUDE_PROJECTS}/${session}/subagents"
 
@@ -98,7 +98,7 @@ _OPENINGS=(
   "We have established a detailed understanding of this project through systematic code exploration. Formalize that understanding into well-structured technical documents."
 )
 _CLOSINGS=(
-  "Begin writing all 5 files now."
+  "Begin writing all 4 files now."
   "Proceed to generate all documentation files."
   "Start producing the documentation immediately."
   "Generate all files and write them to the doc/ directory now."
@@ -107,7 +107,6 @@ _CLOSINGS=(
 
 _core=(
   "Write all output files into the \`doc/\` folder under the current working directory."
-  "First, create \`doc/project_info.txt\` containing the project type and primary programming language. Language must be one of: python, javascript, typescript, java, go, rust, c++, c, c/c++, c#, php, ruby, swift, kotlin, scala, lua, dart, r. Do NOT use aliases like csharp, cpp, golang, js, ts."
   "Generate exactly 4 Markdown documents: overview.md, architecture.md, implementation.md, and a fourth determined by project type."
   "All documentation must be written in English."
   "Every document except overview.md must include exactly one Mermaid diagram with classDef coloring."
@@ -151,23 +150,24 @@ doc_abs_path="$(cd "${DIR}" && pwd)/doc"
 mkdir -p "${doc_abs_path}"
 prompt+=$'\n\n'"IMPORTANT: Write all doc/ output files to this absolute path: ${doc_abs_path}/ (not the current working directory)."
 
-build_out "在 ${PROJECT_DIR} 中执行 claude --resume ${session}（超时 1800s）"
-set +e
-if command -v timeout >/dev/null 2>&1; then
-  rc=0
-  (cd -- "${PROJECT_DIR}" && printf '%s' "${prompt}" | timeout 1800 claude -p \
-    --allowedTools "Edit,Write,Read,Bash,MultiEdit" \
-    --resume "${session}") || rc=$?
-else
-  rc=0
+MAX_CLAUDE_ATTEMPTS=3
+rc=1
+for ((attempt = 1; attempt <= MAX_CLAUDE_ATTEMPTS; attempt++)); do
+  build_out "在 ${PROJECT_DIR} 中执行 claude --resume ${session}（第 ${attempt}/${MAX_CLAUDE_ATTEMPTS} 次，无超时限制）"
+  set +e
   (cd -- "${PROJECT_DIR}" && printf '%s' "${prompt}" | claude -p \
     --allowedTools "Edit,Write,Read,Bash,MultiEdit" \
-    --resume "${session}") || rc=$?
-fi
-set -e
+    --resume "${session}")
+  rc=$?
+  set -e
+  if [[ "${rc}" -eq 0 ]]; then
+    break
+  fi
+  build_err "claude 退出码 ${rc}"
+done
 
 if [[ "${rc}" -ne 0 ]]; then
-  build_err "claude 退出码: ${rc}"
+  build_err "claude 在 ${MAX_CLAUDE_ATTEMPTS} 次尝试后仍失败，最后退出码: ${rc}"
   exit "${rc}"
 fi
 
