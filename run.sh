@@ -12,8 +12,8 @@
 
 set -eu
 
-run_out() { printf '[run.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*"; }
-run_err() { printf '[run.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+run_out() { printf '[run.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+run_err() { printf '[run.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 # 单行：换行压空格
 _fold_one_line() {

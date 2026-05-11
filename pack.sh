@@ -15,8 +15,8 @@ CLASSIFY_SH="${SCRIPT_DIR}/classify.sh"
 : "${OUTPUTS_DIR:=${HOME}/outputs}"
 : "${PROJECTS_DIR:=${HOME}/projects}"
 
-pack_out() { printf '[pack.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*"; }
-pack_err() { printf '[pack.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+pack_out() { printf '[pack.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+pack_err() { printf '[pack.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 usage() {
   pack_err "用法: $0 <github> <repo名称> <session>"

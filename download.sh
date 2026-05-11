@@ -7,8 +7,8 @@
 
 set -e
 
-download_out() { printf '[download.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*"; }
-download_err() { printf '[download.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+download_out() { printf '[download.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+download_err() { printf '[download.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 if [ $# -ne 1 ]; then
   download_err "Usage: $0 <GitHub ZIP URL>"

@@ -3,7 +3,7 @@
 # 依赖：bash、find(GNU)、wc、xargs
 set -euo pipefail
 
-evaluate_err() { printf '[evaluate.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+evaluate_err() { printf '[evaluate.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 usage() { evaluate_err "用法: $0 <target_path>"; }
 

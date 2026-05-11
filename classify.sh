@@ -3,7 +3,7 @@
 # 依赖：bash、mktemp、jq、claude
 set -euo pipefail
 
-classify_err() { printf '[classify.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+classify_err() { printf '[classify.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 usage() {
   classify_err "用法: $0 <code目录> <github>"

@@ -4,8 +4,8 @@
 # 依赖：bash、find、zip（Ubuntu 默认/预装常用）
 set -euo pipefail
 
-zip_out() { printf '[zip.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*"; }
-zip_err() { printf '[zip.sh][%s]%s\n' "$(date '+%Y%m%d%H%M%S')" "$*" >&2; }
+zip_out() { printf '[zip.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+zip_err() { printf '[zip.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 usage() {
   zip_err "用法: $0 <执行路径>"
