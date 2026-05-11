@@ -88,6 +88,8 @@ jq -n \
     extra_info: { input_token: 0, output_token: 0 }
   }' >"${META}"
 
+printf '%s\n' '[]' >"${OUT}/questions.json"
+
 pack_out "====================步骤 4：压缩输出目录===================="
 [[ -f "${ZIP_SH}" ]] || { pack_err "错误: 未找到 zip.sh"; exit 1; }
 bash "${ZIP_SH}" "${OUT}"
