@@ -5,6 +5,7 @@
 
 rm -rf ~/CodeUnderstand
 
+git config --global core.filemode false
 git clone https://gh-proxy.org/https://github.com/YinDongFang/CodeUnderstand.git ~/CodeUnderstand
 chmod -R 777 ~/CodeUnderstand
 
