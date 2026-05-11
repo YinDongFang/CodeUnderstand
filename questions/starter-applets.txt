@@ -1,0 +1,75 @@
+This repo ships three little applets in one tree, spatial versus video versus maps, what is each folder mainly trying to demo if you explain it fast to a new teammate.
+
+The readme tells you dot env keys for two applets but the map one says paste key in the main script, why is that setup not the same and what does it mean for accidentally committing secrets.
+
+The map applet pulls Gemini from a browser import url while spatial and video use npm style imports in Vite, what runtime difference hits you first when you bundle or cache deps.
+
+All three still assume you can call Gemini from the client in a standalone run, plus maps also needs a maps embed key in one place, what is the shared risk story across them.
+
+There is no shared internal library folder between the three applets, is that on purpose so each stays copy paste friendly even if some code repeats.
+
+In the spatial send path you resize the snapshot so the longest side is about six forty before png, what problem is that cap trying to avoid with the model request size.
+
+You sometimes draw ink on the temp canvas then you call toDataURL again, at what exact point does the ink actually get included relative to the first base64 snapshot.
+
+When detect mode is the 2d box mode you build a special sentence with target text and label text fields, which jotai fields feed that sentence into the parts array next to the image.
+
+The answer string only strips one fenced json block then JSON.parse runs, what blows up first if the model returns two json fences or no fence at all.
+
+Points mode divides by one thousand but it swaps x and y when writing jotai points compared to what the prompt text claims about y x order, how should you read that mismatch when checking overlays.
+
+The map tool schema names location and caption for recommend place, how do those names line up with what the callback reads out of call args before render runs.
+
+After generateContent the map script only looks at functionCalls index zero, if the model returns two calls in one shot what does the second call do in this code path.
+
+On first load renderPage passes a percent sign as the location argument before any chat, what does the embed show on first paint with that odd string.
+
+Caption text runs through a replace that kills backslashes before lit renders it, what kind of messy model text is that trying to keep from breaking the template.
+
+The embed helper lives next to a big warning comment about keys in public repos, what is the first thing that breaks if you ship that key unchanged.
+
+The tiny video api file returns the whole response object from generateContent, which part of the main react file actually reads functionCalls and then jumps into the right callback.
+
+The functions file exports a factory that attaches callbacks by function name, why does the parent pass the same setTimecodes body for both basic timecodes and the objects variant.
+
+Chart mode can pull fixed sub mode text or custom chart text, trace how that choice changes the final string passed into generateContent for chart only.
+
+Upload uses a local api route then polls progress, which nested field under the json response must flip to ACTIVE before the player stops showing the loading state.
+
+The system string in the video api says call only one function, does onModeSelect still do its own switch on call name after the response comes back and does that agree with the instruction.
+
+In the big 3d box memo you turn rpy into radians in the prompt parse step then the quaternion math uses sine and cosine of half angles again, is that double work or two different meanings.
+
+The eight corners get reshuffled into a custom order before you build edges, what goes wrong visually if you skip that reorder and use the naive loop order.
+
+Hover hit testing sorts boxes from smallest area to biggest then picks the first hit under the cursor, why not pick the biggest overlapping box first.
+
+Screenshare uses a ref object stored in jotai and Content assigns srcObject in a ref callback, what stale stream issue shows up if you start a new share without reloading.
+
+Letterboxing compares media aspect to container aspect, which branch runs when the video is super tall inside a pretty wide container.
+
+Bump session ticks up on reset and on upload but nothing seems to read that atom for rendering right now, is that counter basically unused today or did I miss a subscriber.
+
+Switching detect type only updates the type string and clears hover flag, old 2d or 3d results stay in jotai until you reset or run send again, why is that rough on users who expect a clean canvas per mode.
+
+There is a show custom prompt flag in the prompt component but it looks stuck false so the custom textarea never appears, unfinished feature or intentional lock.
+
+Spatial root imports safety settings and bump setters yet the jsx never references them, is that just dead wiring left for later or a mistake.
+
+The model dropdown in the top bar updates ModelSelectedAtom, which argument on the spatial generateContent call reads that atom value at send time.
+
+If you want to add a fourth tool, compare wiring callbacks on the map side at declaration build time versus passing a fresh callback map each call in video, which path is less annoying to extend.
+
+Spatial packs a png inline part while video points at an uploaded file uri, where do you hit size or upload pain first on a long clip.
+
+Map chat hard codes a very high temperature while spatial lets you crank it up, if you mirrored the map temperature inside spatial json parsing where would messy output hurt first.
+
+All three pick similar flash style model strings, which single file would you edit to pin the map applet to one model the same way video pins its string in the api module.
+
+Screenshare clicks reset then later sets the stream after getDisplayMedia resolves, can you get a one frame flash of old boxes between those two steps.
+
+Say we only keep the first map function call, what single console log would you add next to functionCalls zero to prove extra calls got dropped.
+
+Spatial parse has no try catch around JSON.parse after the fence split, where does the user see failure versus only the dev console yelling.
+
+Chart mode expects numeric timecodes, if the model returns an empty list which child view looks broken first on screen.

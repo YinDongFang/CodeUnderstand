@@ -1,0 +1,80 @@
+Where does the app glue pinia, the mini router, and the three interceptor plugins together, and does the install order change anything real at runtime?
+
+The routes are built from that big pages json file through uni parse pages, so what actually changes if you add a new page entry there?
+
+In bootstrap there is a compile time branch that skips registering global components on wechat mini program only, what breaks if you flip that mentally and register them anyway?
+
+Which env toggles decide H5 dev time proxy vs always prefixing the backend base url on non H5 builds?
+
+You have two different login gate ideas, one blacklist style interceptor and one router beforeEach list, where do they disagree in real paths?
+
+When you are already logged in but land on myTaskDetail with an info query, why does the guard sometimes rewrite the jump to loginOauth2 with a redirect string?
+
+That helper near the router file that parses info from the query and adds hasToken, why encodeURI there but encodeURIComponent in another branch, does that mismatch bite you?
+
+The ROUTE_PARAMS cache helper stores route plus query for ten minutes, who consumes that cache on the next navigation and what happens if the incoming query is empty?
+
+The white list array only lists two login paths, so any other public page must be handled how or it will bounce to login?
+
+Route names are taken from the last segment of the path, if two pages end with the same leaf name what happens in the router table?
+
+In the http helper, post body and query get merged before sign, which util builds the sign and what exactly goes into the md5 input?
+
+On H5 dev with proxy on, the url gets a proxy prefix, is that path the same one used for signing or does signing happen before the prefix rewrite?
+
+On status 401 the code clears user info then navigates to a fixed login path, is that path always consistent with the oauth login page used elsewhere?
+
+Request interceptor sets Authorization from token while the http layer also sends X-Access-Token, are both required by backend or is one legacy?
+
+After a failed request it emits a z paging error event string, which screens listen for that bus message?
+
+When login response sets loginTenantId, the store copies it into tenantId, if you forget that field what headers go out on the next call?
+
+Pinia persist uses uni storage sync wrappers, where is the persisted key name coming from for the user slice?
+
+The computed login flag only checks token truthiness, can username be filled while token empty and still look logged in?
+
+editUserInfo spreads partial fields into userInfo, does it deep merge nested objects or just top level keys?
+
+clearUserInfo resets to init state, does persisted storage immediately reflect that on disk or only after next tick?
+
+On wechat mini program upload path uses chooseMedia while others use chooseImage, what field name assumptions differ between those two success callbacks?
+
+useUpload passes formData into uni uploadFile with a default file field name, what if backend expects a different field key?
+
+If you call run without passing url, which env built string becomes the upload endpoint?
+
+Upload success handler JSON parses the response string raw, what happens if server returns empty body or non json?
+
+Socket init swaps http to ws and appends userid plus a suffix, where does socket_type show up in the final url?
+
+connectSocket uses protocols array with the raw token, is that how your server expects auth or is it just leftover style?
+
+For eoaNewChatSocket the url pattern changes and adds a random id, what problem was that trying to avoid?
+
+If init runs twice while socket already started, does it silently noop or can you get two sockets?
+
+send always injects userUid from the store before stringify, what if userid is empty during reconnect?
+
+Router beforeEach reads isLogined from pinia while http reads token string for headers, any race right after setUserInfo on a cold start?
+
+The route interceptor default loginRoute points at pages login index, does that path exist in pages json or is it a dead redirect target?
+
+If a page is not on the need login list but also not on router white list, which layer blocks first on a cold open from a deep link?
+
+After 401 clears the store, the next uni request still in flight might resolve with old headers, is that handled anywhere?
+
+useRequest sets error to false on success but catch assigns err to error ref typed boolean, does UI code assume boolean only?
+
+If oauth redirect grows huge because of stringified flow info, which encode function in the router file is more likely to corrupt query parsing?
+
+Tenant id header sometimes zero from init state, does backend treat zero as valid tenant or missing tenant?
+
+Sign helper with GET only and query params, does empty object body change v sign output?
+
+Skipping global component registration on mp weixin, which shared widgets must each page import manually because of that?
+
+If JSON parse on flow info throws inside getPathAndQuery, does the guard crash the whole navigation stack?
+
+When cache restores query onto to.query then calls next with a new object, does that lose hash only routes or other meta the mini router expects?
+

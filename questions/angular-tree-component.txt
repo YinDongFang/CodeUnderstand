@@ -1,0 +1,106 @@
+I'm looking at this repo and there are two Angular projects under it, which folder is the real library I should read first.
+
+The root template nests a viewport tag then an inner div with rtl and node dragging classes, which DOM node actually scrolls when virtual mode is on.
+
+That big state class mixes mobx observable maps with a static focusedTree field, feels odd, what's the story when two trees sit on one page.
+
+setData can refresh nodes without passing new options, does TreeOptions get recreated anyway or only when the options argument is truthy.
+
+The package NgModule declares a pile of components and directives, anything you only get by deep import that the public entry file does not export.
+
+update builds a fake root from rootId plus the children field name from options, walk how virtualRoot.children becomes the roots array apps bind to.
+
+firstUpdate flips false and later updates fire updateData instead of the first time path, what user visible behavior changes between first load and later refresh.
+
+virtualRoot.dispose runs before rebuild, what on the node side actually stops old reactions from reacting to a stale parent.
+
+getNodeById walks a predicate DFS from the fake root, worst case cost when the tree is basically one long chain.
+
+unsubscribeAll clears rx subscriptions from the subscribe helper, who calls that besides the model destroy hook.
+
+TreeNode uuid in constructor when id is missing, if API sends id null then a real id later do you end up with duplicated wrapper nodes.
+
+getField reads those string keys from options like display mapping, typo in a custom field name in options object, silent empty label or a hard runtime error.
+
+findNextNode with go inside true and skip hidden true, keyboard focus walk skips filtered nodes in what exact order.
+
+isPartiallySelected means some descendant selected not all, how checkbox tri state in the template ties back to that getter.
+
+autoLoadChildren runs right after maybe empty children array, which model method does the async callback eventually call to fill kids.
+
+viewport init uses setTimeout zero before first setViewport, layout timing versus unknown child heights on first paint.
+
+getTotalHeight returns auto when virtual scroll is off, deep expanded tree without virtual, is that still considered ok by this lib or you are on your own.
+
+Y_EPSILON rounding ties yBlocks to scrollTop division, scrolling pixel by pixel still bumps blocks often enough for layout.
+
+fixScroll runs from an autorun after height math changes, can it yank scroll position while the user is not touching the wheel.
+
+clear on destroy runs the disposer list from init plus autorun, any bug shape if one reaction handle was not pushed into that array.
+
+tree drag ngDoCheck forces draggable attribute every check, performance worry when the tree is huge.
+
+native drag listener sits outside the angular zone and only forwards drag moves, dragstart dragend still use host listeners, any sync weirdness with hovered drop slots.
+
+treeDrop with allowDragoverStyling false means no CSS class but preventDefault still runs when drop is allowed right.
+
+allowDrop callback reads dragged thing from that small injectable singleton plus raw drag event, parent reorder validation usually lives here.
+
+dragend clears the singleton to null even if dragstart failed halfway, race window with a new dragstart on same tick.
+
+MOVE_NODE handler looks at ctrl for copy else move, who builds the from and to object when you drop on a slot with an index.
+
+keys section in options merges into the default key map or replaces the whole map, which behavior does the code actually do.
+
+performKeyAction on the model resolves key code through the options action mapping then runs handler with tree and node, null handler means key is ignored silently.
+
+TREE_ACTIONS toggle active versus toggle active multi passes a second boolean into toggleActivated on the node, shift click wiring lives in template not the model.
+
+scrollOnActivate option goes into focus call from setActiveNode, virtual scroll scrollIntoView respects same flag or a totally different path.
+
+tree component ngOnChanges wires nodes into model setData, empty array versus undefined input, any behavioral difference.
+
+TreeViewportComponent has its own provider for the virtual scroll helper, TreeModel comes from parent tree component providers, virtual scroll ctor still sees the same tree model instance the host uses right.
+
+Host listener on body keydown bails if active element tag is input or textarea lowercase only, rich text editor in contenteditable still steals keys from the tree.
+
+Same fireEvent path for initialized and moveNode, app listens on generic event output, you always branch on eventName string or is there another reliable field.
+
+copyNode on the tree model sits near moveNode, internal clone payload versus what the move output emits, overlap or separate events.
+
+If mobx computed focusedNode depends on focusedNodeId and you change id on the backing data mid session, focus can jump to wrong row until refresh.
+
+If load children async and new child heights land after user scrolled, virtual root height update triggers another fixScroll jump that feels jumpy to users.
+
+If two treeDrop directives nest and both allowDrop true, inner versus outer dragleave noise makes styling flicker.
+
+dragstart sets dataTransfer text with target id for firefox, row element missing html id attribute, what breaks in practice.
+
+recalcPositions comment mentions loading component height as TBD, which UI state leaves wrong total height until that is fixed.
+
+scrollIntoView with custom scrollContainer measures rects against viewport top, container not an ancestor of viewport, what goes wrong.
+
+fireEvent copies this into the event object then emits name keyed emitter plus generic one, listener mutates state while another listener still running, ordering worry.
+
+static focusedTree compared in isFocused getter, setFocus on one tree, old tree clears pointer where exactly besides setFocus false.
+
+constructor on node calls autoLoadChildren, exact condition that triggers a fetch without user clicking expander.
+
+throttle around seventeen ms on scroll handler, fewer callbacks mean setViewport reads slightly stale scrollTop or just less CPU.
+
+Object.assign style shallow copies on expanded maps inside mobx actions, change detection story for angular here or purely mobx tracking.
+
+I'm confused how eventNames array from the events constant drives output properties on the root component, new key added to constant, compile break or silent missing output.
+
+getNodeByPath mutates the path array with shift while walking, caller passing reused array gets emptied, intentional gotcha.
+
+treeAllowDrop input accepts boolean or function, when function what arguments does the internal allowDrop wrapper actually pass through.
+
+Root tree template still renders tree node collection when roots truthy, empty tree shows a drop slot on virtual root, how drop index zero behaves for first insert.
+
+If uuid generates fresh ids for missing id, cloning immutable tree data twice in same session, risk two wrappers think same business row.
+
+If throttle drops scroll frames during fast wheel, total height style on inner div can lag visible blank gap until next allowed call.
+
+If allowDrop rejects for business rule mid drag, disabled drag over class sticks until next dragenter or it clears on leave.
+
