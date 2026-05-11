@@ -41,6 +41,7 @@ else
 fi
 
 cd "${SCRIPT_DIR}"
+git reset --hard HEAD
 git pull
 
 TARGET_PATH="${PROJECTS_DIR}/${REPO}"
