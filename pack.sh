@@ -42,28 +42,35 @@ code_dir="${OUT}/code"
 
 mkdir -p "${OUT}"
 
-# 步骤 2：导出会话并生成 doc/（与 build.sh 一致，写入 OUTPUTS_DIR/code-understand-<repo>）
+# 步骤 1：导出会话并生成 doc/（与 build.sh 一致，写入 OUTPUTS_DIR/code-understand-<repo>）
+pack_out "====================步骤 1：导出会话并生成 doc/===================="
 bash "${BUILD_SH}" "${repo}" "${session}"
 
+pack_out "====================步骤 2：复制项目代码===================="
 rm -rf "${OUT}/code"
 cp -a -- "${project_path}" "${OUT}/code"
 
-# GitHub API：github 参数无末尾/；将 github.com 替换为 api.github.com/repos
+# GitHub API：github 参数无末尾/；将 github.com 替换为 api.github.com/repos；经 gh-proxy 转发
 api_url="${github//github.com/api.github.com/repos}"
+curl_url="https://gh-proxy.com/${api_url}"
 
+pack_out "====================步骤 3：生成metadata.json===================="
 main_language="unknown"
-if api_json="$(curl -fsSL -- "${api_url}" 2>/dev/null)"; then
+if api_json="$(curl -fsSL -- "${curl_url}" 2>/dev/null)"; then
   main_language="$(printf '%s' "${api_json}" | jq -r '(.language // "") | ascii_downcase' 2>/dev/null || printf '')"
+  pack_out "main_language: ${main_language}"
   [[ -n "${main_language}" ]] || main_language="unknown"
 else
-  pack_err "警告: 无法拉取 GitHub API（${api_url}），main_language=unknown"
+  pack_err "警告: 无法拉取 GitHub API（${curl_url}），main_language=unknown"
 fi
 
 difficulty_level="$(bash "${EVALUATE_SH}" "${project_path}" | tr -d '\r' | head -n1)"
 [[ -n "${difficulty_level}" ]] || difficulty_level="medium"
+pack_out "difficulty_level: ${difficulty_level}"
 
 main_type="$(bash "${CLASSIFY_SH}" "${code_dir}" "${github}" | tr -d '\r' | head -n1)"
 [[ -n "${main_type}" ]] || main_type="Unknown"
+pack_out "main_type: ${main_type}"
 
 jq -n \
   --arg github "${github}" \
@@ -81,8 +88,8 @@ jq -n \
     extra_info: { input_token: 0, output_token: 0 }
   }' >"${META}"
 
+pack_out "====================步骤 4：压缩输出目录===================="
 [[ -f "${ZIP_SH}" ]] || { pack_err "错误: 未找到 zip.sh"; exit 1; }
 bash "${ZIP_SH}" "${OUT}"
 
 pack_out "完成: ${OUT}"
-pack_out "metadata: ${META}"

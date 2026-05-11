@@ -23,32 +23,32 @@ else
   summary="（项目中未找到 README.md）"
 fi
 
-query="$(jq -n --arg summary "${summary}" --arg github "${github}" -r '
-  [
-    "You are an expert software analyst. Analyze the following code project based on the summary below.",
-    "",
-    "GitHub repository:",
-    $github,
-    "",
-    "Project summary:",
-    $summary,
-    "",
-    "Classify the project into exactly one category. The value of main_type MUST be one of these English strings (use spelling and punctuation exactly):",
-    "  - Platform Application",
-    "  - Middleware",
-    "  - Framework/Tools",
-    "  - AI",
-    "  - Game & Multimedia",
-    "  - Security",
-    "  - Learning/Tutorial",
-    "  - Open Source Library / SDK",
-    "  - Other",
-    "  - Unknown",
-    "",
-    "Return ONLY a single JSON object with exactly one key: main_type (string). No markdown, no code fences, no extra keys or text.",
-    "Example: {\"main_type\":\"Framework/Tools\"}",
-  ] | join("\n")
-')"
+# 提示词用纯文本拼接（heredoc 展开 ${github} / ${summary}）；勿在 README 中含单独一行的 CLASSIFY_QUERY_END
+query="$(cat <<CLASSIFY_QUERY_END
+You are an expert software analyst. Analyze the following code project based on the summary below.
+
+GitHub repository:
+${github}
+
+Project summary:
+${summary}
+
+Classify the project into exactly one category. The value of main_type MUST be one of these English strings (use spelling and punctuation exactly):
+  - Platform Application
+  - Middleware
+  - Framework/Tools
+  - AI
+  - Game & Multimedia
+  - Security
+  - Learning/Tutorial
+  - Open Source Library / SDK
+  - Other
+  - Unknown
+
+Return ONLY a single JSON object with exactly one key: main_type (string). No markdown, no code fences, no extra keys or text.
+Example JSON: {"main_type":"Framework/Tools"}
+CLASSIFY_QUERY_END
+)"
 
 claude_tmp="$(mktemp)"
 trap 'rm -f -- "${claude_tmp}"' EXIT

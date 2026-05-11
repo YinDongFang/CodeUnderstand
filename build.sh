@@ -44,6 +44,8 @@ mkdir -p "${SESSION1}"
 build_out "复制 session → ${DST_JSONL}"
 cp -a -- "${SESSION_FILE}" "${DST_JSONL}"
 
+build_out "归一化 JSONL 内 model 字段"
+
 # 与参考 Python 一致：归一化 message.model 与 data.message.message.model 为字面量 "model"
 jq_normalize_line='(
   if (.message | type) == "object" and (.message | has("model")) and .message.model != "model" then
@@ -79,6 +81,7 @@ mv -f -- "${tmp_jsonl}" "${DST_JSONL}"
 trap - EXIT
 build_out "已统一 JSONL 内 model 字段为 \"model\"（变更对象数: ${changed}）"
 
+build_out "复制 subagents"
 if [[ -d "${SA_SRC}" ]]; then
   mkdir -p "${SESSION1}/subagents"
   build_out "复制 subagents: ${SA_SRC} → ${SESSION1}/subagents"
@@ -153,7 +156,7 @@ prompt+=$'\n\n'"IMPORTANT: Write all doc/ output files to this absolute path: ${
 MAX_CLAUDE_ATTEMPTS=3
 rc=1
 for ((attempt = 1; attempt <= MAX_CLAUDE_ATTEMPTS; attempt++)); do
-  build_out "在 ${PROJECT_DIR} 中执行 claude --resume ${session}（第 ${attempt}/${MAX_CLAUDE_ATTEMPTS} 次，无超时限制）"
+  build_out "在 ${PROJECT_DIR} 中执行 claude --resume ${session}（第 ${attempt}/${MAX_CLAUDE_ATTEMPTS} 次）"
   set +e
   (cd -- "${PROJECT_DIR}" && printf '%s' "${prompt}" | claude -p \
     --allowedTools "Edit,Write,Read,Bash,MultiEdit" \
