@@ -18,6 +18,10 @@ CLASSIFY_SH="${SCRIPT_DIR}/classify.sh"
 pack_out() { printf '[pack.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 pack_err() { printf '[pack.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
+pack_out "======================================================"
+pack_out "=                    Start Package                   ="
+pack_out "======================================================"
+
 usage() {
   pack_err "用法: $0 <github> <repo名称> <session>"
   pack_err "  github     仓库 https 地址（无末尾/），如 https://github.com/org/repo"
@@ -48,13 +52,15 @@ bash "${BUILD_SH}" "${repo}" "${session}"
 
 pack_out "====================步骤 2：复制项目代码===================="
 rm -rf "${OUT}/code"
-cp -a -- "${project_path}" "${OUT}/code"
+cp -a -- "${project_path}" "${OUT}/code/${repo}"
+pack_out "代码复制完成"
+pack_out "src: ${project_path}"
+pack_out "dst: ${OUT}/code/${repo}"
 
+pack_out "====================步骤 3：生成metadata.json===================="
 # GitHub API：github 参数无末尾/；将 github.com 替换为 api.github.com/repos；经 gh-proxy 转发
 api_url="${github//github.com/api.github.com/repos}"
 curl_url="https://gh-proxy.com/${api_url}"
-
-pack_out "====================步骤 3：生成metadata.json===================="
 main_language="unknown"
 if api_json="$(curl -fsSL -- "${curl_url}" 2>/dev/null)"; then
   main_language="$(printf '%s' "${api_json}" | jq -r '(.language // "") | ascii_downcase' 2>/dev/null || printf '')"
@@ -94,4 +100,6 @@ pack_out "====================步骤 4：压缩输出目录===================="
 [[ -f "${ZIP_SH}" ]] || { pack_err "错误: 未找到 zip.sh"; exit 1; }
 bash "${ZIP_SH}" "${OUT}"
 
-pack_out "完成: ${OUT}"
+pack_out "======================================================"
+pack_out "=                    Package Done                    ="
+pack_out "======================================================"

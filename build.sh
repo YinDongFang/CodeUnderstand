@@ -84,8 +84,10 @@ build_out "已统一 JSONL 内 model 字段为 \"model\"（变更对象数: ${ch
 build_out "复制 subagents"
 if [[ -d "${SA_SRC}" ]]; then
   mkdir -p "${SESSION1}/subagents"
-  build_out "复制 subagents: ${SA_SRC} → ${SESSION1}/subagents"
   cp -a -- "${SA_SRC}/." "${SESSION1}/subagents/"
+  build_out "subagents复制完成: ${SA_SRC} → ${SESSION1}/subagents"
+  build_out "src: ${SA_SRC}"
+  build_out "dst: ${SESSION1}/subagents"
 else
   build_out "未找到 subagents 目录（跳过）: ${SA_SRC}"
 fi
@@ -156,17 +158,18 @@ prompt+=$'\n\n'"IMPORTANT: Write all doc/ output files to this absolute path: ${
 MAX_CLAUDE_ATTEMPTS=3
 rc=1
 for ((attempt = 1; attempt <= MAX_CLAUDE_ATTEMPTS; attempt++)); do
-  build_out "在 ${PROJECT_DIR} 中执行 claude --resume ${session}（第 ${attempt}/${MAX_CLAUDE_ATTEMPTS} 次）"
+  build_out "claude --resume ${session}（第 ${attempt}/${MAX_CLAUDE_ATTEMPTS} 次）"
   set +e
+  # claude 标准输出/错误丢弃，不打控制台、不写日志文件
   (cd -- "${PROJECT_DIR}" && printf '%s' "${prompt}" | claude -p \
     --allowedTools "Edit,Write,Read,Bash,MultiEdit" \
-    --resume "${session}")
+    --resume "${session}") >/dev/null 2>&1
   rc=$?
   set -e
   if [[ "${rc}" -eq 0 ]]; then
     break
   fi
-  build_err "claude 退出码 ${rc}"
+  build_err "claude 退出码 ${rc}，将重试"
 done
 
 if [[ "${rc}" -ne 0 ]]; then
@@ -174,4 +177,4 @@ if [[ "${rc}" -ne 0 ]]; then
   exit "${rc}"
 fi
 
-build_out "完成。输出根: ${DIR}，会话副本: ${SESSION1}，文档: ${doc_abs_path}"
+build_out "文档生成完成"

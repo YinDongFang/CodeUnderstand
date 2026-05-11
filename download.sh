@@ -10,6 +10,10 @@ set -e
 download_out() { printf '[download.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 download_err() { printf '[download.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
+download_out "======================================================"
+download_out "=                    Start Download                  ="
+download_out "======================================================"
+
 if [ $# -ne 1 ]; then
   download_err "Usage: $0 <GitHub ZIP URL>"
   exit 1
@@ -66,8 +70,12 @@ cd "$TARGET_DIR"
 download_out "Initializing git repository ..."
 git config --global user.email "temp@example.com"
 git config --global user.name "temp"
-git init
-git add .
-git commit -m "Initial commit from $ZIP_URL"
+git init >/dev/null 2>&1
+git add . >/dev/null 2>&1
+git commit -m "Initial commit from $ZIP_URL" >/dev/null 2>&1
 
 download_out "All done! Repository initialized in $(pwd)"
+
+download_out "======================================================"
+download_out "=                    Download Done                   ="
+download_out "======================================================"

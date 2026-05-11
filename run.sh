@@ -58,11 +58,6 @@ if [[ ! -d "${TARGET_PATH}" ]]; then
   exit 1
 fi
 
-
-run_out "======================================================"
-run_out "=                       Loop                         ="
-run_out "======================================================"
-
 SESSION_ID="$(bash "${LOOP_SH}" "${TARGET_PATH}" "${REPO}" | tr -d '\r' | head -n1)"
 [[ -n "${SESSION_ID}" ]] || { run_err "错误: 未取得 session_id"; exit 1; }
 
@@ -91,10 +86,6 @@ python3 "${SCRIPT_DIR}/clean.py" "${REPO}" "${SESSION_ID}" || {
   run_err "clean.py 执行失败"
   exit 1
 }
-
-run_out "======================================================"
-run_out "=                     Packaging                      ="
-run_out "======================================================"
 
 GITHUB_URL="https://github.com/${_GH_USER}/${REPO}"
 bash "${PACK_SH}" "${GITHUB_URL}" "${REPO}" "${SESSION_ID}"

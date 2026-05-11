@@ -43,6 +43,5 @@ rm -f -- "${zip_path}"
     zip -q "${zip_filename}" -@
 )
 
-zip_out "压缩包已创建！"
-zip_out "zip_path=${zip_path}"
-zip_out "zip_filename=${zip_filename}"
+zip_out "压缩包已创建"
+zip_out "zip: ${zip_path}"

@@ -7,6 +7,10 @@ set -eu
 loop_out() { printf '[loop.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 loop_err() { printf '[loop.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
+loop_out "======================================================"
+loop_out "=                    Start Loop                      ="
+loop_out "======================================================"
+
 _fold_one_line() {
   local s=${1//$'\r'/}
   s=${s//$'\n'/ }
@@ -137,5 +141,11 @@ if [[ "${RUN_FAILED}" -ne 0 ]]; then
   loop_err "流程未全部成功"
   exit 1
 fi
+
+loop_out "Session ID: ${SESSION_ID}"
+
+loop_out "======================================================"
+loop_out "=                    Loop Done                       ="
+loop_out "======================================================"
 
 printf '%s\n' "${SESSION_ID}"
