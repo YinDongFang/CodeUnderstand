@@ -6,14 +6,28 @@
 # 逻辑概要:
 #   1) 从 URL 解析 user/repo/branch（与 download.sh 一致）
 #   2) 目标目录 ~/projects/<repo> 不存在则调用 download.sh
-#   3) 从 ./questions/<repo>.txt 读取题目（先当前工作目录下的 questions/，再脚本同目录下的 questions/），每行一题，空行与 # 开头行忽略
+#   3) 从 ./questions/<repo>.txt 读取题目（同上路径），每行一题，忽略空行与 # 行；最多取 38 题，超出丢弃
 #   4) cd 到目标目录，按列表循环 claude：首轮 --output-format json 取 uuid；后续 -r uuid -c；每轮带重试
 
 set -eu
 
+# 单行：换行压空格
+_fold_one_line() {
+  local s=${1//$'\r'/}
+  s=${s//$'\n'/ }
+  printf '%s' "$s"
+}
+
+# 单行摘要：最多 30 字符，超出加 ...
+_preview_text() {
+  local s=$(_fold_one_line "$1") n=30
+  if ((${#s} > n)); then printf '%s...' "${s:0:n}"; else printf '%s' "$s"; fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECTS_DIR="${HOME}/projects"
 MAX_TARGET_ATTEMPTS=4
+MAX_QUESTIONS=38
 RUN_FAILED=0
 
 usage() {
@@ -82,6 +96,11 @@ if [[ "${#QUESTIONS[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+if [[ "${#QUESTIONS[@]}" -gt "$MAX_QUESTIONS" ]]; then
+  echo "[run.sh] 有效题目共 ${#QUESTIONS[@]} 行，仅使用前 ${MAX_QUESTIONS} 题" >&2
+  QUESTIONS=("${QUESTIONS[@]:0:$MAX_QUESTIONS}")
+fi
+
 echo "[run.sh] 共 ${#QUESTIONS[@]} 个问题，进入项目目录执行 claude"
 
 cd "$TARGET_PATH" || { echo "[run.sh] 无法 cd 到 ${TARGET_PATH}" >&2; exit 1; }
@@ -93,6 +112,7 @@ for ((i = 0; i < TOTAL; i++)); do
   Q="${QUESTIONS[$i]}"
   round=$((i + 1))
   echo "[run.sh] ========== 第 ${round}/${TOTAL} 题 =========="
+  echo "[run.sh] Q: $(_fold_one_line "$Q")"
 
   attempt=1
   success=0
@@ -121,27 +141,25 @@ for ((i = 0; i < TOTAL; i++)); do
       _r=$(printf '%s' "$RAW" | tr -d '\r')
       _doc=$(printf '%s' "$_r" | jq -ec . 2>/dev/null) || _doc=$(printf '%s' "$_r" | jq -Rrs 'split("\n")|map(select(test("^\\s*\\{")))|map(try fromjson catch empty)|map(select(type=="object"))|last')
       if ! jq -e 'type=="object"' <<<"$_doc" >/dev/null 2>&1; then
-        echo "[run.sh] 首轮 JSON 解析失败，输出前 500 字符:" >&2
-        printf '%.500s\n' "$RAW" >&2
+        echo "[run.sh] 首轮 JSON 解析失败，输出摘要:" >&2
+        echo "[run.sh] A: $(_preview_text "$RAW")" >&2
         attempt=$((attempt + 1))
         continue
       fi
-      SESSION_ID=$(jq -r '(.uuid//.session_id//"")|tostring' <<<"$_doc")
+      SESSION_ID=$(jq -r '(.session_id//"")|tostring' <<<"$_doc")
       if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
         echo "[run.sh] 首轮未解析到 uuid/session_id，将重试" >&2
         attempt=$((attempt + 1))
         continue
       fi
       OUT_TEXT=$(jq -r '.result|if .==null then "" elif type=="string" then . elif type=="boolean" or type=="number" then tostring else tojson end' <<<"$_doc")
-      echo "[run.sh] session(uuid)=${SESSION_ID}"
-      echo "[run.sh] --- 输出（result）开始 ---"
-      printf '%s\n' "$OUT_TEXT"
-      echo "[run.sh] --- 输出结束 ---"
+      echo "[run.sh] session(uuid)=${SESSION_ID}" >&2
+      ANS="$OUT_TEXT"
     else
-      echo "[run.sh] --- 输出开始 ---"
-      printf '%s\n' "$RAW"
-      echo "[run.sh] --- 输出结束 ---"
+      ANS="$RAW"
     fi
+
+    echo "[run.sh] A: $(_preview_text "$ANS")"
 
     success=1
     break
