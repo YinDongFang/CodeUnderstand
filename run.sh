@@ -11,6 +11,7 @@
 
 set -eu
 
+
 # 单行：换行压空格
 _fold_one_line() {
   local s=${1//$'\r'/}
