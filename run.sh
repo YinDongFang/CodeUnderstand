@@ -10,8 +10,6 @@ PROJECTS_DIR="${HOME}/projects"
 TURNS=38
 MAX_TARGET_ATTEMPTS=4
 RUN_FAILED=0
-# agent 侧通过此软链读代码库，避免跨路径权限问题（相对 agent 目录）
-AGENT_TARGET_LINK_NAME="repo"
 
 usage() {
   echo "用法: $0 <folder> [turns]" >&2
@@ -36,19 +34,11 @@ fi
 
 TARGET_PATH="${PROJECTS_DIR}/${FOLDER}"
 AGENT_DIR="${SCRIPT_DIR}/agent"
-AGENT_TARGET_LINK="${AGENT_DIR}/${AGENT_TARGET_LINK_NAME}"
 
-cleanup_agent_target_link() {
-  if [[ -n "${AGENT_TARGET_LINK:-}" && -L "$AGENT_TARGET_LINK" ]]; then
-    echo "[run.sh][debug] 移除 agent 下目标软链: ${AGENT_TARGET_LINK}"
-    rm -f "$AGENT_TARGET_LINK"
-  fi
-}
-
-echo "[run.sh][debug] SCRIPT_DIR=${SCRIPT_DIR}"
-echo "[run.sh][debug] FOLDER=${FOLDER} TURNS=${TURNS}"
-echo "[run.sh][debug] TARGET_PATH=${TARGET_PATH}"
-echo "[run.sh][debug] AGENT_DIR=${AGENT_DIR}"
+echo "SCRIPT_DIR=${SCRIPT_DIR}"
+echo "FOLDER=${FOLDER} TURNS=${TURNS}"
+echo "TARGET_PATH=${TARGET_PATH}"
+echo "AGENT_DIR=${AGENT_DIR}"
 
 # --- 步骤 1: 检查目标目录是否存在 ---
 if [[ ! -d "$TARGET_PATH" ]]; then
@@ -56,52 +46,32 @@ if [[ ! -d "$TARGET_PATH" ]]; then
   exit 1
 fi
 
-# --- 步骤 2: 在 agent 目录下创建指向目标仓库的软链（供 Learner 读代码，避免跨路径权限）---
-echo "[run.sh][debug][步骤2] 目标软链: ${AGENT_TARGET_LINK} -> ${TARGET_PATH}"
-if [[ -e "$AGENT_TARGET_LINK" ]] || [[ -L "$AGENT_TARGET_LINK" ]]; then
-  echo "[run.sh][debug][步骤2] 已存在同名路径，删除后重新创建: ${AGENT_TARGET_LINK}"
-  rm -rf "$AGENT_TARGET_LINK"
-fi
-if ! ln -s "$TARGET_PATH" "$AGENT_TARGET_LINK"; then
-  echo "[run.sh][debug][步骤2] ln -s 失败，任务中断" >&2
-  exit 1
-fi
-trap cleanup_agent_target_link EXIT
-
-# --- 步骤 2b: 放宽目录权限，避免 claude 因权限无法读软链目标 ---
-echo "[run.sh][debug][步骤2b] 放宽权限"
-if ! chmod -R 777 "$AGENT_DIR" 2>/dev/null; then
-  echo "[run.sh][debug][步骤2b] 警告: chmod agent 目录未成功（可忽略于部分环境）" >&2
-fi
-if ! chmod -R 777 "$PROJECTS_DIR" 2>/dev/null; then
-  echo "[run.sh][debug][步骤2b] 警告: chmod projects 父目录未成功（可忽略于部分环境）" >&2
-fi
-
-# --- 步骤 3: agent 目录生成第一个问题 ---
+# --- 步骤 3: agent 首次提问（仅此步用 --output-format json + jq 取 uuid/result；后续均为默认文本）---
 echo "[run.sh][debug][步骤3] cd ${AGENT_DIR}"
 cd "$AGENT_DIR" || { echo "[run.sh][debug][步骤3] 无法进入 agent 目录，任务中断" >&2; exit 1; }
 
-STEP3_PROMPT="读取 ${AGENT_TARGET_LINK} 目录（软链到目标仓库），生成第一个问题"
-echo "[run.sh][debug][步骤3] 运行: claude -p -n ${FOLDER} ${STEP3_PROMPT}"
+STEP3_PROMPT="读取 ${TARGET_PATH} 目录，生成第一个问题"
+echo "[run.sh][debug][步骤3] 运行: claude -p --add-dir '${TARGET_PATH}' --output-format json '${STEP3_PROMPT}'"
 
 set +e
-QUESTION=$(claude -p -n "$FOLDER" "$STEP3_PROMPT" 2>&1)
+STEP3_RAW=$(claude -p --add-dir "$TARGET_PATH" --output-format json "${STEP3_PROMPT}" 2>&1)
 STEP3_EXIT=$?
 set -e
-
-echo "[run.sh][debug][步骤3] --- claude 输出（第一个问题）开始 ---"
-printf '%s\n' "$QUESTION"
-echo "[run.sh][debug][步骤3] --- claude 输出结束 ---"
 
 if [[ "$STEP3_EXIT" -ne 0 ]]; then
   echo "[run.sh][debug][步骤3] claude 失败，任务中断" >&2
   exit 1
 fi
 
-if [[ -z "${QUESTION//[[:space:]]/}" ]]; then
-  echo "[run.sh][debug][步骤3] 错误: 第一个问题为空，任务中断" >&2
-  exit 1
-fi
+_r=$(printf '%s' "$STEP3_RAW" | tr -d '\r')
+_doc=$(printf '%s' "$_r" | jq -ec . 2>/dev/null) || _doc=$(printf '%s' "$_r" | jq -Rrs 'split("\n")|map(select(test("^\\s*\\{")))|map(try fromjson catch empty)|map(select(type=="object"))|last')
+jq -e 'type=="object"' <<<"$_doc" >/dev/null 2>&1 || { echo "[run.sh][debug][步骤3] JSON 解析失败" >&2; exit 1; }
+SESSION_ID=$(jq -r '(.uuid//.session_id//"")|tostring' <<<"$_doc")
+QUESTION=$(jq -r '.result|if .==null then "" elif type=="string" then . elif type=="boolean" or type=="number" then tostring else tojson end' <<<"$_doc")
+echo "[run.sh][debug][步骤3] 解析 session(uuid)=${SESSION_ID}"
+echo "[run.sh][debug][步骤3] --- 问题内容（result）开始 ---"
+printf '%s\n' "$QUESTION"
+echo "[run.sh][debug][步骤3] --- 问题内容结束 ---"
 
 # --- 步骤 4: 循环 turns 轮 ---
 for ((i = 1; i <= TURNS; i++)); do
@@ -110,7 +80,7 @@ for ((i = 1; i <= TURNS; i++)); do
   echo "[run.sh][debug][步骤4.1] cd 项目目录 ${TARGET_PATH}"
   cd "$TARGET_PATH" || { echo "[run.sh][debug][步骤4.1] 无法进入项目目录" >&2; RUN_FAILED=1; break; }
 
-  # 4.2 在真实仓库目录执行 Reader，首轮无 -c，之后带 -c；失败重试共 3 次重试（最多 4 次尝试）
+  # 4.2 Reader：在 target 目录执行，默认输出（无 json），首轮无 -c，之后带 -c
   attempt=1
   success=0
   RESULT=""
@@ -143,13 +113,13 @@ for ((i = 1; i <= TURNS; i++)); do
     break
   fi
 
-  # 4.3 agent：把 Reader 输出作为单一参数传入（bash 的 "$RESULT" 作为 argv 一项，无需对引号做二次转义）
+  # 4.3 Learner：同一 session（-r sessionid），默认输出（仅步骤 3 用过 json）
   echo "[run.sh][debug][步骤4.3] cd ${AGENT_DIR}"
   cd "$AGENT_DIR" || { echo "[run.sh][debug][步骤4.3] 无法进入 agent" >&2; RUN_FAILED=1; break; }
 
-  echo "[run.sh][debug][步骤4.3] 运行: claude -p -r ${FOLDER} \"\$RESULT\"（RESULT 长度=${#RESULT}）"
+  echo "[run.sh][debug][步骤4.3] 运行: claude -p -r \"${SESSION_ID}\" --add-dir \"${TARGET_PATH}\" \"\$RESULT\""
   set +e
-  NEXT_QUESTION=$(claude -p -r "$FOLDER" "$RESULT" 2>&1)
+  NEXT_QUESTION=$(claude -p -r "$SESSION_ID" --add-dir "$TARGET_PATH" "$RESULT" 2>&1)
   STEP43_EXIT=$?
   set -e
 
@@ -163,14 +133,7 @@ for ((i = 1; i <= TURNS; i++)); do
     break
   fi
 
-  if [[ "$i" -lt "$TURNS" ]]; then
-    if [[ -z "${NEXT_QUESTION//[[:space:]]/}" ]]; then
-      echo "[run.sh][debug][步骤4.3] 错误: 下一轮问题为空" >&2
-      RUN_FAILED=1
-      break
-    fi
-    QUESTION="$NEXT_QUESTION"
-  fi
+  [[ "$i" -lt "$TURNS" ]] && QUESTION="$NEXT_QUESTION"
 done
 
 if [[ "$RUN_FAILED" -ne 0 ]]; then
