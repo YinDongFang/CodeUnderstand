@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 从 ~/.claude/projects/{session} 导出会话，归一化 JSONL 内 model 字段，再在项目目录续会话生成 doc/。
 # 用法: build.sh <repo> <session>
-#   repo     与 pack.sh 一致，项目在 PROJECTS_DIR 下；输出根为 OUTPUTS_DIR/code-understand-<repo>
+#   repo     项目在 PROJECTS_DIR 下；输出根为 OUTPUTS_DIR/code-understand-<repo>
 #   session  对应 ~/.claude/projects/-home-$USER-projects-${repo//_/-}/<session>.jsonl 与 .../subagents/
+# 典型调用链：run.sh 在 clean.py 之后先执行本脚本，再执行 pack.sh（pack 只做复制代码 / metadata / zip）。
 #
 # 环境变量（默认与 pack.sh 一致）: OUTPUTS_DIR, PROJECTS_DIR
 # 依赖: bash, cp, mkdir, jq, claude, shuf

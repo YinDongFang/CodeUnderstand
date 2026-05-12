@@ -3,7 +3,7 @@
 从 Claude Code 会话 JSONL 中提取「真实用户提问」（与 clean.py 规则一致），
 可选地批量替换 message.content 后写回。
 
-真实提问：type=user 且 message.content 为字符串（非含 tool_result 的 list）等。
+真实提问：type=user 且 message.content 为单行字符串（无换行）、非 list 等。
 临时文件格式：每行一个 JSON 字符串，对应一条问题（便于一行一号编辑）。
 """
 
@@ -43,7 +43,10 @@ def _is_real_user_question(obj: Any) -> bool:
     # 含 tool_result 的续行 user 消息 content 为 list，不是真实用户提问
     if not isinstance(content, str):
         return False
-    if not isinstance(content, str) or not content.strip():
+    if not content.strip():
+        return False
+    # 仅单行正文：不含换行符（与临时文件「一行一条」编辑方式一致）
+    if "\n" in content or "\r" in content:
         return False
     if content.strip().startswith("<task-notification>"):
         return False
@@ -140,7 +143,7 @@ def write_jsonl_with_text_mapping(
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="列出并可选地改写 Claude Code 会话 JSONL 中的用户提问（message.content 为字符串的 user 行）"
+        description="列出并可选地改写会话 JSONL 中的用户单行提问（message.content 为无换行的字符串的 user 行）"
     )
     ap.add_argument(
         "session_path",
@@ -159,8 +162,8 @@ def main() -> int:
     questions = collect_user_questions(objects)
     if not questions:
         print(
-            "未找到可编辑的用户提问（type=user 且 message.content 为非空字符串、"
-            "不得为含 tool_result 的 list、且非 <task-notification>）。"
+            "未找到可编辑的用户提问（type=user 且 message.content 为非空单行字符串、"
+            "不得含换行符、不得为含 tool_result 的 list、且非 <task-notification>）。"
         )
         return 0
 

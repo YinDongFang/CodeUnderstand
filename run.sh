@@ -4,12 +4,12 @@
 #   ./run.sh https://github.com/storybookjs/storybook/archive/refs/heads/next.zip
 #
 # 逻辑概要:
-#   0) 调用 evaluate.sh：若为 easy 难度则直接退出（不跑 loop / pack）
+#   0) 调用 evaluate.sh：若为 easy 难度则直接退出（不跑 loop / build / pack）
 #   1) 从 URL 解析 user/repo/branch（与 download.sh 一致）
 #   2) 目标目录 ${PROJECTS_DIR}/<repo> 不存在则调用 download.sh
 #   3) 调用 loop.sh 完成多轮 claude 对话（stdout 仅返回 session_id）
 #   4) 清理 git、调用 clean.py
-#   5) 调用 pack.sh（github / repo / session）
+#   5) 调用 build.sh（repo / session）再调用 pack.sh（github / repo / session）
 #   全程 stdout/stderr 同时写入 SCRIPT_DIR/.logs/<repo>_YYYY-MM-DD_HH-MM-SS.log（URL 解析成功后启用）
 set -eu
 set -o pipefail
@@ -19,6 +19,7 @@ run_err() { printf '[run.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOOP_SH="${SCRIPT_DIR}/loop.sh"
+BUILD_SH="${SCRIPT_DIR}/build.sh"
 PACK_SH="${SCRIPT_DIR}/pack.sh"
 EVALUATE_SH="${SCRIPT_DIR}/evaluate.sh"
 : "${PROJECTS_DIR:=${HOME}/projects}"
@@ -78,7 +79,7 @@ difficulty="$(bash "${EVALUATE_SH}" "${TARGET_PATH}" | tr -d '\r' | head -n1)"
 [[ -n "${difficulty}" ]] || difficulty="medium"
 run_out "evaluate.sh → difficulty=${difficulty}"
 if [[ "${difficulty}" == "easy" ]]; then
-  run_out "easy 项目，跳过后续（loop / clean / pack）并退出。"
+  run_out "easy 项目，跳过后续（loop / clean / build / pack）并退出。"
   exit 0
 fi
 
@@ -113,6 +114,25 @@ python3 "${SCRIPT_DIR}/clean.py" "${REPO}" "${SESSION_ID}" || {
 }
 
 GITHUB_URL="https://github.com/${_GH_USER}/${REPO}"
-bash "${PACK_SH}" "${GITHUB_URL}" "${REPO}" "${SESSION_ID}"
+
+if [[ ! -f "${BUILD_SH}" ]]; then
+  run_err "错误: 未找到 ${BUILD_SH}"
+  exit 1
+fi
+run_out "调用 build.sh（repo=${REPO} session=${SESSION_ID}）"
+bash "${BUILD_SH}" "${REPO}" "${SESSION_ID}" || {
+  run_err "build.sh 执行失败"
+  exit 1
+}
+
+if [[ ! -f "${PACK_SH}" ]]; then
+  run_err "错误: 未找到 ${PACK_SH}"
+  exit 1
+fi
+run_out "调用 pack.sh（github / repo / session）"
+bash "${PACK_SH}" "${GITHUB_URL}" "${REPO}" "${SESSION_ID}" || {
+  run_err "pack.sh 执行失败"
+  exit 1
+}
 
 run_out "任务完成"
