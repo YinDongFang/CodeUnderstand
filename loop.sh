@@ -11,7 +11,7 @@
 #   会话日志单文件：默认 ./loop_logs/run__<REPO>__<RUN>.txt，恢复且已有 repo session 时为 repo__<session_id>__<RUN>.txt；
 #   可用 LOOP_LOG_DIR / LOOP_LOG_FILE 覆盖目录或完整路径。
 #   正式环境：会话日志里 Prompt/Result 为单行缩略（换行压空格，超出 LOOP_LOG_COMPACT_MAX 则末尾 ...）；mock 仍为完整多行。
-#   提问方 agent 调用 claude 时默认追加：--model claude-sonnet-4-6 --effort medium（可用 LOOP_AGENT_CLAUDE_MODEL / LOOP_AGENT_CLAUDE_EFFORT 覆盖）；repo 目录不调这两项。
+#   提问方 agent 调用 claude 时默认追加：--model claude-sonnet-4-6 --effort medium --add-dir <TARGET_PATH>（可用 LOOP_AGENT_CLAUDE_* 覆盖 model/effort）；repo 目录不调这些。
 # =============================================================================
 #
 # 【这个脚本在干什么】
@@ -185,7 +185,7 @@ mkdir -p "${WORK}"
 cleanup() { rm -rf "${WORK}"; }
 trap cleanup EXIT
 
-# 真实 claude 或 mock。第一个参数为 cwd（与 AGENT_DIR 比较）；仅 agent 侧且非 mock 时追加 --model / --effort
+# 真实 claude 或 mock。第一个参数为 cwd（与 AGENT_DIR 比较）；仅 agent 侧且非 mock 时追加 --model / --effort / --add-dir（目标仓库 TARGET_PATH）
 _claude_invoke_with_cwd() {
   local cwd="$1"
   shift
@@ -194,7 +194,7 @@ _claude_invoke_with_cwd() {
     return
   fi
   if [[ "${cwd}" == "${AGENT_DIR}" ]]; then
-    command claude --model "${AGENT_CLAUDE_MODEL}" --effort "${AGENT_CLAUDE_EFFORT}" "$@"
+    command claude --model "${AGENT_CLAUDE_MODEL}" --effort "${AGENT_CLAUDE_EFFORT}" --add-dir "${TARGET_PATH}" "$@"
   else
     command claude "$@"
   fi
