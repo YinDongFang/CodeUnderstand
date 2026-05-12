@@ -23,10 +23,12 @@ pack_out "=                    Start Package                   ="
 pack_out "======================================================"
 
 usage() {
-  pack_err "用法: $0 <github> <repo名称> <session>"
+  pack_err "用法: $0 <github> <repo名称> <session> [step]"
   pack_err "  github     仓库 https 地址（无末尾/），如 https://github.com/org/repo"
   pack_err "  repo名称   项目在 PROJECTS_DIR 下的目录名，如 react"
-  pack_err "  session    Claude 会话 id，供步骤 2 调用 build.sh（~/.claude/projects/<session>.jsonl）"
+  pack_err "  session    Claude 会话 id，步骤 1 调用 build.sh 时使用"
+  pack_err "  step       从第几步开始执行，默认 1（不跳过）。2=从复制项目代码开始，跳过步骤 1"
+  pack_err "             步骤: 1=导出会话并生成 doc  2=复制代码  3=metadata+questions  4=压缩"
   pack_err "  可选环境变量 OUTPUTS_DIR（默认 \$HOME/outputs）、PROJECTS_DIR（默认 \$HOME/projects）"
 }
 
@@ -34,7 +36,9 @@ usage() {
 github="${1}"
 repo="${2}"
 session="${3}"
+step="${4:-1}"
 [[ -n "${github}" && -n "${repo}" && -n "${session}" ]] || { usage; exit 1; }
+[[ "${step}" =~ ^[1-4]$ ]] || { pack_err "错误: step 须为 1–4 的整数，当前: ${step}"; exit 1; }
 [[ "${repo}" != */* && "${repo}" != *..* ]] || { pack_err "错误: repo 名称非法（不能含 / 或 ..）"; exit 1; }
 
 project_path="${PROJECTS_DIR}/${repo}"
@@ -45,19 +49,31 @@ META="${OUT}/metadata.json"
 code_dir="${OUT}/code"
 
 mkdir -p "${OUT}"
+pack_out "起始步骤: ${step}（1=步骤 1 起，不跳过）"
 
 # 步骤 1：导出会话并生成 doc/（与 build.sh 一致，写入 OUTPUTS_DIR/code-understand-<repo>）
-pack_out "====================步骤 1：导出会话并生成 doc/===================="
-bash "${BUILD_SH}" "${repo}" "${session}"
+if ((step <= 1)); then
+  pack_out "====================步骤 1：导出会话并生成 doc/===================="
+  bash "${BUILD_SH}" "${repo}" "${session}"
+else
+  pack_out "====================跳过步骤 1（从步骤 ${step} 开始）===================="
+fi
 
-pack_out "====================步骤 2：复制项目代码===================="
-rm -rf "${OUT}/code"
-cp -a -- "${project_path}" "${OUT}/code/${repo}"
-pack_out "代码复制完成"
-pack_out "src: ${project_path}"
-pack_out "dst: ${OUT}/code/${repo}"
+# 步骤 2：复制项目代码
+if ((step <= 2)); then
+  pack_out "====================步骤 2：复制项目代码===================="
+  rm -rf "${OUT}/code"
+  cp -a -- "${project_path}" "${OUT}/code/${repo}"
+  pack_out "代码复制完成"
+  pack_out "src: ${project_path}"
+  pack_out "dst: ${OUT}/code/${repo}"
+else
+  pack_out "====================跳过步骤 2===================="
+fi
 
-pack_out "====================步骤 3：生成metadata.json===================="
+# 步骤 3：生成 metadata.json、questions.json
+if ((step <= 3)); then
+  pack_out "====================步骤 3：生成metadata.json===================="
 # GitHub API：github 参数无末尾/；将 github.com 替换为 api.github.com/repos；经 gh-proxy 转发
 api_url="${github//github.com/api.github.com/repos}"
 curl_url="https://gh-proxy.com/${api_url}"
@@ -95,10 +111,18 @@ jq -n \
   }' >"${META}"
 
 printf '%s\n' '[]' >"${OUT}/questions.json"
+else
+  pack_out "====================跳过步骤 3===================="
+fi
 
-pack_out "====================步骤 4：压缩输出目录===================="
-[[ -f "${ZIP_SH}" ]] || { pack_err "错误: 未找到 zip.sh"; exit 1; }
-bash "${ZIP_SH}" "${OUT}"
+# 步骤 4：压缩输出目录
+if ((step <= 4)); then
+  pack_out "====================步骤 4：压缩输出目录===================="
+  [[ -f "${ZIP_SH}" ]] || { pack_err "错误: 未找到 zip.sh"; exit 1; }
+  bash "${ZIP_SH}" "${OUT}"
+else
+  pack_out "====================跳过步骤 4===================="
+fi
 
 pack_out "======================================================"
 pack_out "=                    Package Done                    ="
