@@ -6,9 +6,10 @@
 # 逻辑概要:
 #   1) 从 URL 解析 user/repo/branch（与 download.sh 一致）
 #   2) 目标目录 ${PROJECTS_DIR}/<repo> 不存在则调用 download.sh
-#   3) 调用 loop.sh 完成多轮 claude 对话（stdout 仅返回 session_id）
-#   4) 清理 git、调用 clean.py
-#   5) 调用 pack.sh（github / repo / session）
+#   3) 调用 evaluate.sh；若为 easy 则直接结束（不跑 loop / pack）
+#   4) 调用 loop.sh 完成多轮 claude 对话（stdout 仅返回 session_id）
+#   5) 清理 git、调用 clean.py
+#   6) 调用 pack.sh（github / repo / session）
 #   全程 stdout/stderr 同时写入 SCRIPT_DIR/.logs/<repo>_YYYY-MM-DD_HH-MM-SS.log（URL 解析成功后启用）
 set -eu
 set -o pipefail
@@ -19,6 +20,7 @@ run_err() { printf '[run.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOOP_SH="${SCRIPT_DIR}/loop.sh"
 PACK_SH="${SCRIPT_DIR}/pack.sh"
+EVALUATE_SH="${SCRIPT_DIR}/evaluate.sh"
 : "${PROJECTS_DIR:=${HOME}/projects}"
 
 usage() {
@@ -66,6 +68,18 @@ fi
 if [[ ! -d "${TARGET_PATH}" ]]; then
   run_err "错误: 下载后仍不存在目录: ${TARGET_PATH}"
   exit 1
+fi
+
+if [[ ! -f "${EVALUATE_SH}" ]]; then
+  run_err "错误: 未找到 ${EVALUATE_SH}"
+  exit 1
+fi
+DIFFICULTY="$(bash "${EVALUATE_SH}" "${TARGET_PATH}" | tr -d '\r' | head -n1)"
+[[ -n "${DIFFICULTY}" ]] || DIFFICULTY="medium"
+run_out "evaluate: difficulty=${DIFFICULTY}"
+if [[ "${DIFFICULTY}" == "easy" ]]; then
+  run_out "easy 项目，跳过后续 loop/pack，结束运行"
+  exit 0
 fi
 
 SESSION_ID="$(bash "${LOOP_SH}" "${TARGET_PATH}" "${REPO}" | tr -d '\r' | head -n1)"
