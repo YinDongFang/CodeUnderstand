@@ -2,3 +2,4 @@
 /agent-**
 /loop_logs/
 /.logs
+/tmp
