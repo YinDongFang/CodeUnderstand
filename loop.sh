@@ -2,6 +2,15 @@
 # =============================================================================
 # loop.sh — 双 Agent 编排脚本（给不熟悉 shell 的阅读说明）
 # =============================================================================
+# 【正式运行 vs 测试（mock）】
+#   正式（默认）：不要设置 LOOP_USE_MOCK_CLAUDE；PATH 中需要真实 claude，以及 jq、python3。
+#   测试：export LOOP_USE_MOCK_CLAUDE=1；不调用真实 claude，改用 testing/mock_claude.sh；仍需要 jq、python3。
+#   切回正式：unset LOOP_USE_MOCK_CLAUDE（或 export LOOP_USE_MOCK_CLAUDE=0）后照常执行即可。
+#   测试常用：export LOOP_PHASE1_TARGET=4 LOOP_TOTAL_TARGET=6 缩短路径；
+#             export LOOP_MOCK_DUMP_DIR=./out/mock1 指定落盘目录（默认 ./loop_mock_prompts/<REPO>_$$/）。
+#             export LOOP_MOCK_USE_JSONL_RESUME=1 若要在 mock 下仍走 ~/.claude jsonl 恢复逻辑。
+#   mock 每次调用会在 LOOP_MOCK_DUMP_DIR 下生成 0001_json_first.prompt.txt、.response.json 或 0002_resume.prompt.txt、.response.txt 等，便于核对 prompt 与假输出。
+# =============================================================================
 #
 # 【这个脚本在干什么】
 #   1) 在「代码仓库目录」TARGET_PATH 里跑 claude，让它像「答题方」回答技术问题。
@@ -28,7 +37,7 @@
 #   ./loop.sh <target_path> <repo>
 #   例：./loop.sh /path/to/myproject myproject
 #
-# 【依赖】bash, sed, grep, jq, python3, 以及 PATH 里的 claude
+# 【依赖】bash, sed, grep, jq, python3；正式模式另需 PATH 中的 claude
 #
 # 【shell 小知识：set -eu】
 #   -e：任意命令返回非 0（失败）时，整个脚本立刻退出，避免「错了还往下跑」。
@@ -82,6 +91,7 @@ else
   TARGET_PATH="$(cd "$(dirname "${1}")" && pwd)/$(basename "${1}")"
 fi
 REPO="${2}"
+USER="${USER:-$(id -un 2>/dev/null || printf unknown)}"
 [[ -d "${TARGET_PATH}" ]] || { loop_err "错误: 目录不存在: ${TARGET_PATH}"; exit 1; }
 
 # BASH_SOURCE[0] 是当前脚本路径；dirname + cd + pwd 得到脚本所在目录的绝对路径
@@ -143,6 +153,12 @@ REPO_PROMPT_COUNT=0
 [[ -f "${AGENT_SRC}/PromptFinal.md" ]] || { loop_err "错误: 未找到 PromptFinal.md"; exit 1; }
 [[ -f "${RENDER_PY}" ]] || { loop_err "错误: 未找到 ${RENDER_PY}"; exit 1; }
 
+command -v jq >/dev/null 2>&1 || { loop_err "错误: 未找到 jq"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { loop_err "错误: 未找到 python3"; exit 1; }
+if [[ -z "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+  command -v claude >/dev/null 2>&1 || { loop_err "错误: 未找到 claude（测试请设 LOOP_USE_MOCK_CLAUDE=1）"; exit 1; }
+fi
+
 # 临时文件目录：优先用系统 TMPDIR；$$ 是当前 shell 进程号，保证并发运行不撞名
 TMPDIR="${TMPDIR:-/tmp}"
 RUN_ID="${REPO}_$$"
@@ -152,6 +168,21 @@ mkdir -p "${WORK}"
 # 脚本无论正常结束还是被中断，EXIT 时都会删临时目录，避免磁盘垃圾
 cleanup() { rm -rf "${WORK}"; }
 trap cleanup EXIT
+
+# 真实 claude 或 mock（见文件头「测试：不调用真实 AI」）
+_claude_invoke() {
+  if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+    bash "${SCRIPT_DIR}/testing/mock_claude.sh" "$@"
+  else
+    command claude "$@"
+  fi
+}
+
+if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+  export LOOP_MOCK_DUMP_DIR="${LOOP_MOCK_DUMP_DIR:-${SCRIPT_DIR}/loop_mock_prompts/${RUN_ID}}"
+  mkdir -p "${LOOP_MOCK_DUMP_DIR}"
+  loop_out "LOOP_USE_MOCK_CLAUDE=1 MOCK_DUMP=${LOOP_MOCK_DUMP_DIR}"
+fi
 
 # 把模型返回的一整段文字「拆成一行一行的题目」：
 #   - 去掉 Windows 风格的 \r
@@ -202,7 +233,6 @@ _parse_first_json_doc() {
   local raw="$1"
   local _r _doc
   _r=$(printf '%s' "${raw}" | tr -d '\r')
-  # 先试「整段 stdout 就是单个 JSON」；失败则走兜底：按行找以 { 开头的 JSON，取能 parse 的最后一个对象
   _doc=$(printf '%s' "${_r}" | jq -ec . 2>/dev/null) || _doc=$(printf '%s' "${_r}" | jq -Rrs 'split("\n")|map(select(test("^\\s*\\{")))|map(try fromjson catch empty)|map(select(type=="object"))|last')
   if ! jq -e 'type=="object"' <<<"${_doc}" >/dev/null 2>&1; then
     printf ''
@@ -223,7 +253,7 @@ _claude_json_first() {
     loop_out "  [json-first] 尝试 ${attempt}/${MAX_TARGET_ATTEMPTS} cwd=${cwd}"
     # 临时关闭 -e：我们要自己判断 claude 的退出码，而不是让它直接杀脚本
     set +e
-    raw="$(cd "${cwd}" && claude --output-format json -p "${prompt}" 2>&1)"
+    raw="$(cd "${cwd}" && _claude_invoke --output-format json -p "${prompt}" 2>&1)"
     local ex=$?
     set -e
     if [[ "${ex}" -ne 0 ]]; then
@@ -262,7 +292,7 @@ _claude_resume_text() {
     loop_out "  [resume] 尝试 ${attempt}/${MAX_TARGET_ATTEMPTS} cwd=${cwd}"
     # 与 json-first 相同：先关 -e，自行处理 claude 退出码
     set +e
-    raw="$(cd "${cwd}" && claude -r "${sid}" -c -p "${prompt}" 2>&1)"
+    raw="$(cd "${cwd}" && _claude_invoke -r "${sid}" -c -p "${prompt}" 2>&1)"
     ex=$?
     set -e
     if [[ "${ex}" -ne 0 ]]; then
@@ -399,6 +429,14 @@ if [[ -n "${SESSION_JSONL}" && -f "${SESSION_JSONL}" ]]; then
   loop_out "恢复 repo 会话: ${SESSION_JSONL} session_id=${SESSION_REPO} 已完成用户锚点=${REPO_PROMPT_COUNT}"
 else
   loop_out "未检测到 repo 侧历史 jsonl，从零开始"
+fi
+
+# Mock 默认忽略 jsonl 恢复，避免本机历史把计数顶满导致阶段一不进循环；需要测恢复路径时设 LOOP_MOCK_USE_JSONL_RESUME=1
+if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" && -z "${LOOP_MOCK_USE_JSONL_RESUME:-}" ]]; then
+  SESSION_JSONL=""
+  SESSION_REPO=""
+  REPO_PROMPT_COUNT=0
+  loop_out "Mock：已忽略 jsonl 恢复（LOOP_MOCK_USE_JSONL_RESUME=1 可保留）"
 fi
 
 # 已经满 38：脚本唯一「成功 stdout」仍是打印 session_id，供外层 run.sh 等脚本捕获
