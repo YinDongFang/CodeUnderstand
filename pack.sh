@@ -62,7 +62,7 @@ pack_out "dst: ${OUT}/code/${repo}"
 pack_out "====================步骤 2：生成 metadata.json===================="
 # GitHub API：github 参数无末尾/；将 github.com 替换为 api.github.com/repos；经 gh-proxy 转发
 api_url="${github//github.com/api.github.com/repos}"
-curl_url="https://gh-proxy.com/${api_url}"
+curl_url="https://gh-proxy.org/${api_url}"
 main_language="unknown"
 if api_json="$(curl -fsSL -- "${curl_url}" 2>/dev/null)"; then
   main_language="$(printf '%s' "${api_json}" | jq -r '(.language // "") | ascii_downcase' 2>/dev/null || printf '')"
