@@ -10,6 +10,7 @@
 #             export LOOP_MOCK_USE_JSONL_RESUME=1 若要在 mock 下仍走 ~/.claude jsonl 恢复逻辑。
 #   会话日志单文件：默认 ./loop_logs/run__<REPO>__<RUN>.txt，恢复且已有 repo session 时为 repo__<session_id>__<RUN>.txt；
 #   可用 LOOP_LOG_DIR / LOOP_LOG_FILE 覆盖目录或完整路径。
+#   正式环境：会话日志里 Prompt/Result 为单行缩略（换行压空格，超出 LOOP_LOG_COMPACT_MAX 则末尾 ...）；mock 仍为完整多行。
 # =============================================================================
 #
 # 【这个脚本在干什么】
@@ -64,6 +65,18 @@ _fold_one_line() {
 _preview_text() {
   local s=$(_fold_one_line "$1") n=30
   if ((${#s} > n)); then printf '%s...' "${s:0:n}"; else printf '%s' "$s"; fi
+}
+
+# 正式环境会话日志：压成单行并截断（长度由 LOOP_LOG_COMPACT_MAX 控制，默认 200）
+_log_compact_line() {
+  local s="$1" max="${LOOP_LOG_COMPACT_MAX:-200}" lim
+  s="$(_fold_one_line "${s}")"
+  lim=$((max > 3 ? max - 3 : 1))
+  if ((${#s} > max)); then
+    printf '%s...' "${s:0:lim}"
+  else
+    printf '%s' "${s}"
+  fi
 }
 
 # 去掉首尾空白：用的是 bash 参数展开技巧，不必依赖外部命令
@@ -188,18 +201,31 @@ _loop_infer_side() {
   fi
 }
 
-# 追加一条「Prompt / Result」块到会话日志（单文件；LOOP_LOG_FILE 在 main 中初始化）
+# 追加一条「Prompt / Result」到会话日志。mock：完整多行；正式：各单行缩略（换行压空格后截断）
 _loop_log_turn() {
   [[ -z "${LOOP_LOG_FILE:-}" ]] && return 0
   local role="$1" p="$2" r="$3"
-  {
-    printf '%s\n' "====================="
-    printf '%s\n\n' "${role}"
-    printf '%s\n' "Prompt："
-    printf '%s\n\n' "${p}"
-    printf '%s\n' "Result："
-    printf '%s\n\n' "${r}"
-  } >>"${LOOP_LOG_FILE}"
+  if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+    {
+      printf '%s\n' "====================="
+      printf '%s\n\n' "${role}"
+      printf '%s\n' "Prompt："
+      printf '%s\n\n' "${p}"
+      printf '%s\n' "Result："
+      printf '%s\n\n' "${r}"
+    } >>"${LOOP_LOG_FILE}"
+  else
+    local ps rs
+    ps="$(_log_compact_line "${p}")"
+    rs="$(_log_compact_line "${r}")"
+    {
+      printf '%s\n' "====================="
+      printf '%s\n' "${role}"
+      printf '%s\n' "Prompt：${ps}"
+      printf '%s\n' "Result：${rs}"
+      printf '\n'
+    } >>"${LOOP_LOG_FILE}"
+  fi
 }
 
 # 首次拿到 repo session_id 后，将 run__*.txt 重命名为 repo__<session>__*.txt，便于与 session 关联
