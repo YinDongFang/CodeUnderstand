@@ -58,11 +58,11 @@ fi
 # Medium: 20_000 ≤ LOC ≤ 50_000 且 50 ≤ 文件 ≤ 500
 # Difficult: LOC > 200_000 且 文件数 > 500
 difficulty=medium
-if ((lines < 20000 && files < 50)); then
+if ((lines < 16000 && files < 45)); then
   difficulty=easy
-elif ((lines > 200000 && files > 500)); then
+elif ((lines > 160000 && files > 450)); then
   difficulty=difficult
-elif ((lines >= 20000 && lines <= 50000 && files >= 50 && files <= 500)); then
+elif ((lines >= 16000 && lines <= 50000 && files >= 45 && files <= 450)); then
   difficulty=medium
 fi
 
