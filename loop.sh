@@ -226,6 +226,8 @@ _loop_log_bind_repo_session() {
 
 if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
   loop_out "LOOP_USE_MOCK_CLAUDE=1（会话日志仍写入 LOOP_LOG_FILE）"
+  export LOOP_MOCK_SEQ_FILE="${WORK}/.mock_seq"
+  printf '0\n' >"${LOOP_MOCK_SEQ_FILE}"
 fi
 
 # 把模型返回的一整段文字「拆成一行一行的题目」：
