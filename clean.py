@@ -1,9 +1,9 @@
 """
 Claude Code 会话去重：单文件入口。
 
-参数 target：在 ~/.claude/projects 下解析项目目录（以 `-projects-{target}` 结尾，
-不区分大小写；多个时取会话 .jsonl 最近修改的目录；无则试 `-home-{user}-projects-{target}`，
-user 由 USER / LOGNAME / USERNAME 或 getpass 推断）。
+参数 target：在 ~/.claude/projects 下解析项目目录（以 `-projects-{path_target}` 结尾，
+path_target 为 target 将下划线替换为短横线后的形式；不区分大小写；多个时取会话 .jsonl 最近修改的目录；
+无则试 `-home-{user}-projects-{path_target}`，user 由 USER / LOGNAME / USERNAME 或 getpass 推断）。
 
 参数 session_id：在该项目目录下处理 `{session_id}.jsonl`（可带或不带 .jsonl 后缀）。
 """
@@ -58,16 +58,22 @@ def _latest_activity_mtime(project_dir: str) -> float:
         return 0.0
 
 
+def normalize_repo_for_claude_projects_path(target: str) -> str:
+    """Claude 项目目录名中 repo 段的下划线需为短横线，与 build.sh / loop.sh 一致。"""
+    return (target or "").replace("_", "-")
+
+
 def resolve_project_dir(projects_root: str, target: str) -> str:
     """
     解析项目目录：
-    1) 所有以 `-projects-{target}` 结尾的目录（路径名不区分大小写）；
+    1) 所有以 `-projects-{path_target}` 结尾的目录（path_target 为 target 中 _ 换为 -；路径名不区分大小写）；
        仅一个则用之；多个则取其中会话 .jsonl 最近修改的目录。
-    2) 若无匹配，再尝试 `-home-{infer_path_username()}-projects-{target}`。
+    2) 若无匹配，再尝试 `-home-{infer_path_username()}-projects-{path_target}`。
     """
     if not os.path.isdir(projects_root):
         raise FileNotFoundError(f"Claude 项目目录不存在: {projects_root}")
-    suffix = f"-projects-{target}"
+    path_target = normalize_repo_for_claude_projects_path(target)
+    suffix = f"-projects-{path_target}"
     suffix_l = suffix.lower()
     matches = [
         os.path.join(projects_root, d)
@@ -81,7 +87,7 @@ def resolve_project_dir(projects_root: str, target: str) -> str:
         return max(matches, key=_latest_activity_mtime)
 
     user = infer_path_username()
-    slug = f"-home-{user}-projects-{target}"
+    slug = f"-home-{user}-projects-{path_target}"
     exact = os.path.join(projects_root, slug)
     if os.path.isdir(exact):
         return exact
@@ -867,7 +873,7 @@ if __name__ == "__main__":
     )
     ap.add_argument(
         "target",
-        help="用于匹配 ~/.claude/projects 下 *-projects-{target} 的项目目录名最后一段",
+        help="用于匹配 ~/.claude/projects 下 *-projects-{target} 的项目目录名最后一段（下划线会按与脚本一致规则替换为短横线再匹配）",
     )
     ap.add_argument(
         "session_id",

@@ -9,7 +9,7 @@
 #   3) 调用 loop.sh 完成多轮 claude 对话（stdout 仅返回 session_id）
 #   4) 清理 git、调用 clean.py
 #   5) 调用 pack.sh（github / repo / session）
-
+#   全程 stdout/stderr 同时写入 SCRIPT_DIR/.logs/<repo>_YYYY-MM-DD_HH-MM-SS.log（URL 解析成功后启用）
 set -eu
 set -o pipefail
 
@@ -40,6 +40,11 @@ else
   exit 1
 fi
 
+mkdir -p "${SCRIPT_DIR}/.logs"
+LOG_FILE="${SCRIPT_DIR}/.logs/${REPO}_$(date '+%Y-%m-%d_%H-%M-%S').log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+run_out "日志文件: ${LOG_FILE}"
+
 cd "${SCRIPT_DIR}"
 git reset --hard HEAD
 git pull
@@ -65,6 +70,7 @@ fi
 
 SESSION_ID="$(bash "${LOOP_SH}" "${TARGET_PATH}" "${REPO}" | tr -d '\r' | head -n1)"
 [[ -n "${SESSION_ID}" ]] || { run_err "错误: 未取得 session_id"; exit 1; }
+run_out "SESSION_ID=${SESSION_ID}"
 
 run_out "全部题目完成，开始清理 git 状态"
 cd "${TARGET_PATH}" || exit 1

@@ -2,7 +2,7 @@
 # 从 ~/.claude/projects/{session} 导出会话，归一化 JSONL 内 model 字段，再在项目目录续会话生成 doc/。
 # 用法: build.sh <repo> <session>
 #   repo     与 pack.sh 一致，项目在 PROJECTS_DIR 下；输出根为 OUTPUTS_DIR/code-understand-<repo>
-#   session  对应 ~/.claude/projects/<session>.jsonl 与 ~/.claude/projects/<session>/subagents/
+#   session  对应 ~/.claude/projects/-home-$USER-projects-${repo//_/-}/<session>.jsonl 与 .../subagents/
 #
 # 环境变量（默认与 pack.sh 一致）: OUTPUTS_DIR, PROJECTS_DIR
 # 依赖: bash, cp, mkdir, jq, claude, shuf
@@ -27,9 +27,10 @@ session="${2}"
 [[ "${repo}" != */* && "${repo}" != *..* ]] || { build_err "错误: repo 名称非法"; exit 1; }
 command -v jq >/dev/null 2>&1 || { build_err "错误: 需要 jq"; exit 1; }
 
+repo_slug="${repo//_/-}"
 DIR="${OUTPUTS_DIR}/code-understand-${repo}"
 PROJECT_DIR="${PROJECTS_DIR}/${repo}"
-CLAUDE_PROJECTS="${HOME}/.claude/projects/-home-${USER}-projects-${repo}"
+CLAUDE_PROJECTS="${HOME}/.claude/projects/-home-${USER}-projects-${repo_slug}"
 SESSION_FILE="${CLAUDE_PROJECTS}/${session}.jsonl"
 SA_SRC="${CLAUDE_PROJECTS}/${session}/subagents"
 
