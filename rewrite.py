@@ -8,7 +8,7 @@
               （优先 SESSION_ID 环境变量对应文件；否则取该目录最新修改的顶层 *.jsonl）
   copyPath    ${OUTPUTS_DIR}/code-understand-{repo}/sessions/session1/session.jsonl
 
-用户消息仅从 sourcePath 解析列出；确认修改后，同一套「源正文→新正文」映射
+用户消息仅从 sourcePath 解析并写入临时文件供编辑；编辑保存后，同一套「源正文→新正文」映射
 对 sourcePath 与 copyPath 两份 JSONL 均做字面量替换写回。
 
 真实提问：type=user 且 message.content 为单行字符串（无换行）、非 list 等。
@@ -164,13 +164,6 @@ def load_questions_from_tmp(path: str) -> list[str]:
     return lines
 
 
-def print_numbered_questions(questions: list[str]) -> None:
-    for n, text in enumerate(questions, start=1):
-        print(f"----- [{n}] -----")
-        print(text)
-        print()
-
-
 def _json_string_literal(text: str) -> str:
     """JSON 字符串的源码形式（含首尾双引号与转义）。"""
     return json.dumps(text, ensure_ascii=False)
@@ -215,7 +208,7 @@ def write_jsonl_with_text_mapping(
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="按 repo 解析 ~/.claude 与 OUTPUTS 下两份 session.jsonl，列出并改写用户单行提问"
+        description="按 repo 解析 ~/.claude 与 OUTPUTS 下两份 session.jsonl，用 gedit 编辑并写回用户单行提问"
     )
     ap.add_argument(
         "repo",
@@ -254,19 +247,11 @@ def main() -> int:
         )
         return 0
 
-    print_numbered_questions(questions)
-    print(f"共 {len(questions)} 条问题。")
-
-    ans = input("是否需要修改？(y/N): ").strip().lower()
-    if ans not in ("y", "yes", "是"):
-        print("已取消，未修改文件。")
-        return 0
-
     tmp_dir = os.path.join(os.getcwd(), "tmp")
     tmp_path = os.path.join(tmp_dir, f"{repo}_questions.txt")
     dump_questions_to_tmp(tmp_path, questions)
-    print(f"已写入: {tmp_path}")
-    print("说明: 每行一条 JSON 字符串，对应上面 [1]、[2]… 顺序；仅改字符串内文字，勿增删行数。")
+    print(f"已写入: {tmp_path}（共 {len(questions)} 条）")
+    print("说明: 每行一条 JSON 字符串，顺序与会话中一致；仅改字符串内文字，勿增删行数。")
 
     new_list: list[str] = []
     while True:
@@ -305,16 +290,6 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-
-    k = 0
-    for old_text, new_text in zip(questions, new_list):
-        if new_text == old_text:
-            continue
-        k += 1
-        print(f"问题{k}")
-        print(f"source: {old_text}")
-        print(f"replace: {new_text}")
-        print()
 
     with open(copy_path, "r", encoding="utf-8") as f:
         raw_copy = f.readlines()
