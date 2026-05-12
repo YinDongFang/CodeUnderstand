@@ -100,15 +100,10 @@ printf '%s\n' '[]' >"${OUT}/questions.json"
 
 # 步骤 3：交互改写会话 JSONL 后压缩输出目录
 pack_out "====================步骤 3：rewrite 会话 JSONL===================="
-repo_slug="${repo//_/-}"
-session_jsonl="${HOME}/.claude/projects/-home-${USER}-projects-${repo_slug}/${session}.jsonl"
 [[ -f "${REWRITE_PY}" ]] || { pack_err "错误: 未找到 rewrite.py: ${REWRITE_PY}"; exit 1; }
-[[ -f "${session_jsonl}" ]] || {
-  pack_err "错误: 会话文件不存在（与 build.sh 路径规则一致）: ${session_jsonl}"
-  exit 1
-}
-pack_out "调用: python3 ${REWRITE_PY} ${session_jsonl}"
-(cd "${SCRIPT_DIR}" && python3 "${REWRITE_PY}" "${session_jsonl}") || {
+pack_out "调用: SESSION_ID=${session} python3 ${REWRITE_PY} ${repo}"
+(export SESSION_ID="${session}"
+ cd "${SCRIPT_DIR}" && python3 "${REWRITE_PY}" "${repo}") || {
   pack_err "错误: rewrite.py 退出非零"
   exit 1
 }
