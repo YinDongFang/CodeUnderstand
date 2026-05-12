@@ -11,7 +11,9 @@
  * Skips: zip exists -> skip download; extracted dir exists -> skip extract;
  *        final projects/<repo> exists -> skip download+extract+rename.
  * Extract: WINRAR env, WinRAR.exe in Program Files, registry exe64; else tar; else PowerShell Expand-Archive.
- * Agent: PATH `agent --trust -p <prompt>` from projects/<repo> (per current script).
+ * Agent: `agent --trust -p <prompt>` with cwd `projects/<repo>`.
+ *   Prompt is sent as **one argv line**: CR/LF → literal two-char `\` + `n` (so shells do not break multiline).
+ *   Spawn **without** `shell: true` (direct argv; avoids cmd truncation).
  * On agent failure: no questions/<repo>.txt, no git; see questions/<repo>.agent-log.txt
  *
  * Requires: Node 18+ (fetch), git; optional curl (else fetch only), WinRAR or tar or PowerShell.
@@ -35,6 +37,16 @@ const COMMIT_PREFIX = Buffer.from([
 ]).toString("utf8"); // "自动创建题目 "
 
 const MAX_AGENT_CAPTURE = 100 * 1024 * 1024;
+
+/**
+ * Turn multiline prompt into a single physical line: each newline becomes literal `\` + `n`
+ * (backslash-n), for argv / shell compatibility. Normalize CRLF/CR first.
+ * @param {string} text
+ */
+function promptToSingleLine(text) {
+  return text
+    .replace(/\r\n/g, "\n\n").replace(/"/g, "'");
+}
 
 function log(...args) {
   console.log("[download]", ...args);
@@ -84,8 +96,6 @@ function spawnCapture(cmd, args, opts = {}) {
     const out = [];
     /** @type {Buffer[]} */
     const err = [];
-    let outLen = 0;
-    let errLen = 0;
 
     const push = (chunks, buf, lenRef) => {
       if (lenRef.v + buf.length > MAX_AGENT_CAPTURE) {
@@ -237,80 +247,67 @@ async function downloadZip(proxyUrl, destPath) {
 }
 
 /**
- * @param {string} debugLogPath
- * @param {string} line
- */
-async function appendDebugLog(debugLogPath, line) {
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
-  await fsp.appendFile(debugLogPath, `[${ts}] ${line}\n`, "utf8");
-}
-
-/**
  * @param {string} workDir
  * @param {string} prompt
  * @param {string} outFile
  */
 async function runAgent(workDir, prompt, outFile) {
-  const debugLog = outFile.replace(/\.txt$/i, "") + ".agent-log.txt";
-  const writeLog = async (msg) => {
-    try {
-      await appendDebugLog(debugLog, msg);
-    } catch {
-      /* ignore */
-    }
-  };
+  const promptArg = promptToSingleLine(prompt);
+  log("=== agent step start ===");
+  log(`WorkDir=${workDir}`);
+  log(`OutFile=${outFile}`);
+  log(`Prompt:\n\n${promptArg}`);
 
-  await writeLog("=== agent step start ===");
-  await writeLog(`WorkDir=${workDir} OutFile=${outFile}`);
-  await writeLog(`Invoke: agent (PATH) promptLen=${prompt.length}`);
+  log(
+    `prompt: rawLen=${prompt.length} flatLen=${promptArg.length} (each newline -> two chars backslash + n)`,
+  );
 
-  const args = ["--trust", "-p", prompt];
+  const args = ["--trust", "-p", promptArg];
   let r;
   try {
     r = await spawnCapture("agent", args, {
       cwd: workDir,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      shell: true,
     });
   } catch (e) {
-    await writeLog(`EXCEPTION: ${/** @type {Error} */ (e).message}`);
+    log(`EXCEPTION: ${/** @type {Error} */ (e).message}`);
     await safeUnlink(outFile);
-    return { ok: false, code: 127, debugLog };
+    return { ok: false, code: 127 };
   }
 
   const code = r.code === null ? 1 : r.code;
   const textOut = [r.stdout || "", r.stderr || ""].filter(Boolean).join("\n");
 
   if (code !== 0) {
-    await writeLog(`FAILED ExitCode=${code}`);
+    log(`FAILED ExitCode=${code}`);
     if (textOut.trim()) {
-      await writeLog("---- process output ----");
+      log("---- process output ----");
       const max = 8000;
       const clip =
         textOut.length > max
           ? textOut.slice(0, max) + "\n... (truncated)"
           : textOut;
       for (const ln of clip.split(/\r\n|\n|\r/)) {
-        if (ln.length) await writeLog(ln);
+        if (ln.length) log(ln);
       }
     } else {
-      await writeLog("(no stdout/stderr captured)");
+      log("(no stdout/stderr captured)");
     }
     await safeUnlink(outFile);
-    return { ok: false, code, debugLog };
+    return { ok: false, code };
   }
 
   if (!textOut.trim()) {
-    await writeLog(
-      "FAILED: empty stdout/stderr with ExitCode=0 (treated as failure)",
-    );
+    log("FAILED: empty stdout/stderr with ExitCode=0 (treated as failure)");
     await safeUnlink(outFile);
-    return { ok: false, code: 1, debugLog };
+    return { ok: false, code: 1 };
   }
 
   await fsp.writeFile(outFile, textOut, "utf8");
-  await writeLog("ExitCode=0 OK, wrote OutFile");
-  return { ok: true, code: 0, debugLog };
+  log("ExitCode=0 OK, wrote OutFile");
+  return { ok: true, code: 0 };
 }
 
 /**
@@ -433,7 +430,7 @@ async function main() {
   const agentLogRel = path.join("questions", `${repo}.agent-log.txt`);
 
   log("agent ->", outFile);
-  const ar = await runAgent(target, promptText, outFile);
+  const ar = await runAgent(__dirname, promptText, outFile);
   if (!ar.ok) {
     logErr(
       `agent failed (exit ${ar.code}). No questions file; git skipped. Log: ${agentLogRel}`,
