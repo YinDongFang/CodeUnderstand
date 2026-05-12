@@ -46,7 +46,7 @@ project_path="${PROJECTS_DIR}/${repo}"
 
 OUT="${OUTPUTS_DIR}/code-understand-${repo}"
 META="${OUT}/metadata.json"
-code_dir="${OUT}/code"
+code_dir="${OUT}/code/${repo}"
 
 mkdir -p "${OUT}"
 pack_out "起始步骤: ${step}（1=步骤 1 起，不跳过）"
@@ -63,6 +63,7 @@ fi
 if ((step <= 2)); then
   pack_out "====================步骤 2：复制项目代码===================="
   rm -rf "${OUT}/code"
+  mkdir -p "${OUT}/code"
   cp -a -- "${project_path}" "${OUT}/code/${repo}"
   pack_out "代码复制完成"
   pack_out "src: ${project_path}"
