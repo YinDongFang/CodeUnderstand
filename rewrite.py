@@ -8,6 +8,8 @@
               （优先 SESSION_ID 环境变量对应文件；否则取该目录最新修改的顶层 *.jsonl）
   copyPath    ${OUTPUTS_DIR}/code-understand-{repo}/sessions/session1/session.jsonl
 
+临时编辑：${CODE_UNDERSTAND_STATE_ROOT}/tmp/{repo}_questions.txt（STATE_ROOT 默认 ~/Documents）。
+
 用户消息仅从 sourcePath 解析并写入临时文件供编辑；编辑保存后，同一套「源正文→新正文」映射
 对 sourcePath 与 copyPath 两份 JSONL 均做字面量替换写回。
 
@@ -25,6 +27,14 @@ import shutil
 import subprocess
 import sys
 from typing import Any
+
+
+def _state_root() -> str:
+    """日志/agent 副本同根目录，与 run.sh / loop.sh 的 CODE_UNDERSTAND_STATE_ROOT 一致。"""
+    raw = os.environ.get("CODE_UNDERSTAND_STATE_ROOT", "").strip()
+    if raw:
+        return os.path.abspath(os.path.expanduser(raw))
+    return os.path.join(os.path.expanduser("~"), "Documents")
 
 
 def _infer_username() -> str:
@@ -247,7 +257,7 @@ def main() -> int:
         )
         return 0
 
-    tmp_dir = os.path.join(os.getcwd(), "tmp")
+    tmp_dir = os.path.join(_state_root(), "tmp")
     tmp_path = os.path.join(tmp_dir, f"{repo}_questions.txt")
     dump_questions_to_tmp(tmp_path, questions)
     print(f"已写入: {tmp_path}（共 {len(questions)} 条）")

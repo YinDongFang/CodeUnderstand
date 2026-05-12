@@ -10,7 +10,8 @@
 #   3) 调用 loop.sh 完成多轮 claude 对话（stdout 仅返回 session_id）
 #   4) 清理 git、调用 clean.py
 #   5) 调用 build.sh（repo / session）再调用 pack.sh（github / repo / session）
-#   全程 stdout/stderr 同时写入 SCRIPT_DIR/.logs/<repo>_YYYY-MM-DD_HH-MM-SS.log（URL 解析成功后启用）
+#   全程 stdout/stderr 同时写入 ${CODE_UNDERSTAND_STATE_ROOT}/logs/<repo>_YYYY-MM-DD_HH-MM-SS.log
+#   （默认 CODE_UNDERSTAND_STATE_ROOT=$HOME/Documents；URL 解析成功后启用）
 set -eu
 set -o pipefail
 
@@ -23,6 +24,8 @@ BUILD_SH="${SCRIPT_DIR}/build.sh"
 PACK_SH="${SCRIPT_DIR}/pack.sh"
 EVALUATE_SH="${SCRIPT_DIR}/evaluate.sh"
 : "${PROJECTS_DIR:=${HOME}/projects}"
+: "${CODE_UNDERSTAND_STATE_ROOT:=${HOME}/Documents}"
+export CODE_UNDERSTAND_STATE_ROOT
 
 usage() {
   run_err "用法: $0 <GitHub ZIP URL>"
@@ -43,8 +46,8 @@ else
   exit 1
 fi
 
-mkdir -p "${SCRIPT_DIR}/.logs"
-LOG_FILE="${SCRIPT_DIR}/.logs/${REPO}_$(date '+%Y-%m-%d_%H-%M-%S').log"
+mkdir -p "${CODE_UNDERSTAND_STATE_ROOT}/logs"
+LOG_FILE="${CODE_UNDERSTAND_STATE_ROOT}/logs/${REPO}_$(date '+%Y-%m-%d_%H-%M-%S').log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 run_out "日志文件: ${LOG_FILE}"
 

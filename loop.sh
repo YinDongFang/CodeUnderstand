@@ -8,8 +8,8 @@
 #   切回正式：unset LOOP_USE_MOCK_CLAUDE（或 export LOOP_USE_MOCK_CLAUDE=0）后照常执行即可。
 #   测试常用：export LOOP_PHASE1_TARGET=4 LOOP_TOTAL_TARGET=6 缩短路径；
 #             export LOOP_MOCK_USE_JSONL_RESUME=1 若要在 mock 下仍走 ~/.claude jsonl 恢复逻辑。
-#   会话日志单文件：默认 ./loop_logs/run__<REPO>__<RUN>.txt，恢复且已有 repo session 时为 repo__<session_id>__<RUN>.txt；
-#   可用 LOOP_LOG_DIR / LOOP_LOG_FILE 覆盖目录或完整路径。
+#   会话日志单文件：默认 ${CODE_UNDERSTAND_STATE_ROOT}/loop_logs/run__<REPO>__<RUN>.txt（STATE_ROOT 默认 ~/Documents）；
+#   恢复且已有 repo session 时为 repo__<session_id>__<RUN>.txt；可用 LOOP_LOG_DIR / LOOP_LOG_FILE 覆盖。
 #   正式环境：会话日志里 Prompt/Result 为单行缩略（换行压空格，超出 LOOP_LOG_COMPACT_MAX 则末尾 ...）；mock 仍为完整多行。
 #   提问方 agent 调用 claude 时默认追加：--model claude-sonnet-4-6 --effort medium --add-dir <TARGET_PATH>（可用 LOOP_AGENT_CLAUDE_* 覆盖 model/effort）；repo 目录不调这些。
 # =============================================================================
@@ -33,7 +33,7 @@
 #     export LOOP_VIEWS_ANGLE_MAX=4
 #
 # 【为什么有两套目录】
-#   ./agent        只是模板；真正运行时复制成 ./agent-{repo}，避免多个仓库互相污染。
+#   ./agent        只是模板；真正运行时复制到 ${CODE_UNDERSTAND_STATE_ROOT}/agent-{repo}（默认在 ~/Documents）。
 #
 # 【怎么调用】
 #   ./loop.sh <target_path> <repo>
@@ -110,8 +110,10 @@ USER="${USER:-$(id -un 2>/dev/null || printf unknown)}"
 
 # BASH_SOURCE[0] 是当前脚本路径；dirname + cd + pwd 得到脚本所在目录的绝对路径
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${CODE_UNDERSTAND_STATE_ROOT:=${HOME}/Documents}"
+export CODE_UNDERSTAND_STATE_ROOT
 AGENT_SRC="${SCRIPT_DIR}/agent"
-AGENT_DIR="${SCRIPT_DIR}/agent-${REPO}"
+AGENT_DIR="${CODE_UNDERSTAND_STATE_ROOT}/agent-${REPO}"
 RENDER_PY="${SCRIPT_DIR}/loop_render_prompt.py"
 
 # 仅 cwd 为 agent-{repo}（提问方）时传给 claude 的默认模型与 effort；可用环境变量覆盖
@@ -523,7 +525,7 @@ if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" && -z "${LOOP_MOCK_USE_JSONL_RESUME:-}" ]];
 fi
 
 # ---------- 会话日志（MOCK/正式共用，单 txt；文件名含 RUN_ID，拿到 repo session 后尽量改为 repo__<id>__）----------
-LOOP_LOG_DIR="${LOOP_LOG_DIR:-${SCRIPT_DIR}/loop_logs}"
+LOOP_LOG_DIR="${LOOP_LOG_DIR:-${CODE_UNDERSTAND_STATE_ROOT}/loop_logs}"
 mkdir -p "${LOOP_LOG_DIR}"
 if [[ -n "${SESSION_REPO}" ]]; then
   LOOP_LOG_FILE="${LOOP_LOG_FILE:-${LOOP_LOG_DIR}/repo__${SESSION_REPO}__${RUN_ID}.txt}"

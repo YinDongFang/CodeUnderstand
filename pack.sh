@@ -3,8 +3,9 @@
 # 依赖：bash、cp、jq、curl、python3、同目录 classify.sh（需 claude）/ evaluate.sh / rewrite.py / zip.sh（及 zip）
 #
 # 环境变量（可选，有默认值；由调用方保证为已展开路径）：
-#   OUTPUTS_DIR   输出根目录，默认 ${HOME}/outputs
-#   PROJECTS_DIR  本地项目根目录，默认 ${HOME}/projects
+#   OUTPUTS_DIR                  输出根目录，默认 ${HOME}/outputs
+#   PROJECTS_DIR                 本地项目根目录，默认 ${HOME}/projects
+#   CODE_UNDERSTAND_STATE_ROOT   日志与 rewrite 临时目录根，默认 ${HOME}/Documents（与 run.sh / loop.sh 一致）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +16,8 @@ REWRITE_PY="${SCRIPT_DIR}/rewrite.py"
 
 : "${OUTPUTS_DIR:=${HOME}/outputs}"
 : "${PROJECTS_DIR:=${HOME}/projects}"
+: "${CODE_UNDERSTAND_STATE_ROOT:=${HOME}/Documents}"
+export CODE_UNDERSTAND_STATE_ROOT
 
 pack_out() { printf '[pack.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 pack_err() { printf '[pack.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
