@@ -118,7 +118,6 @@ In lines 120-145, how is this handled (retry, timeout, fallback)? Why is this br
 
 20. md写法多
 规则：如果问题出现多处xx xx的写法，在md阅读器或其他现代化文档里可以当成代码块显示的，基本可以直接认定 AI 味明显。
-例子：
 
 最实用的判定口径
 直接看这几条：
