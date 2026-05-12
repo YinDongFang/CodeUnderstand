@@ -1,10 +1,3 @@
-<question>
-{question}
-</question>
-<anwser>
-{anwser} 
-</anwser>
-
 <transcript>
 {transcript}
 </transcript>
