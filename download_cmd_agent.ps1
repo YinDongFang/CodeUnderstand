@@ -21,7 +21,7 @@ $prompt = $text.Replace('{repo}', $Repo)
 Push-Location $WorkDir
 try {
     # PowerShell 5.1 无 *> 重定向，合并 stderr 后写入文件
-    $output = & agent -p $prompt 2>&1
+    $output = & agent -p --trust $prompt 2>&1
     $code = $LASTEXITCODE
     $output | Set-Content -LiteralPath $OutFile -Encoding UTF8
     exit $code
