@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 依赖：bash、cp、jq、curl、python3、同目录 rewrite.py / build.sh / classify.sh（需 claude）/ evaluate.sh / zip.sh（及 zip）
+# 依赖：bash、cp、jq、curl、python3、同目录 build.sh / classify.sh（需 claude）/ evaluate.sh / rewrite.py / zip.sh（及 zip）
 #
 # 环境变量（可选，有默认值；由调用方保证为已展开路径）：
 #   OUTPUTS_DIR   输出根目录，默认 ${HOME}/outputs
@@ -11,6 +11,7 @@ ZIP_SH="${SCRIPT_DIR}/zip.sh"
 BUILD_SH="${SCRIPT_DIR}/build.sh"
 EVALUATE_SH="${SCRIPT_DIR}/evaluate.sh"
 CLASSIFY_SH="${SCRIPT_DIR}/classify.sh"
+REWRITE_PY="${SCRIPT_DIR}/rewrite.py"
 
 : "${OUTPUTS_DIR:=${HOME}/outputs}"
 : "${PROJECTS_DIR:=${HOME}/projects}"
@@ -27,8 +28,8 @@ usage() {
   pack_err "  github     仓库 https 地址（无末尾/），如 https://github.com/org/repo"
   pack_err "  repo名称   项目在 PROJECTS_DIR 下的目录名，如 react"
   pack_err "  session    Claude 会话 id，步骤 1 调用 build.sh 时使用"
-  pack_err "  step       从第几步开始执行，默认 1（不跳过）。2=从复制项目代码开始，跳过步骤 1 及前置 rewrite"
-  pack_err "             步骤: 1=导出会话并生成 doc  2=复制代码  3=metadata+questions  4=压缩"
+  pack_err "  step       从第几步开始执行，默认 1（不跳过）。2=从复制项目代码开始，跳过步骤 1"
+  pack_err "             步骤: 1=导出会话并生成 doc  2=复制代码  3=metadata+questions  4=rewrite 会话+压缩"
   pack_err "  可选环境变量 OUTPUTS_DIR（默认 \$HOME/outputs）、PROJECTS_DIR（默认 \$HOME/projects）"
 }
 
@@ -53,17 +54,10 @@ pack_out "起始步骤: ${step}（1=步骤 1 起，不跳过）"
 
 # 步骤 1：导出会话并生成 doc/（与 build.sh 一致，写入 OUTPUTS_DIR/code-understand-<repo>）
 if ((step <= 1)); then
-  repo_slug="${repo//_/-}"
-  SESSION_JSONL="${HOME}/.claude/projects/-home-${USER}-projects-${repo_slug}/${session}.jsonl"
-  pack_out "====================前置：rewrite.py（会话用户提问，可选）===================="
-  [[ -f "${SCRIPT_DIR}/rewrite.py" ]] || { pack_err "错误: 未找到 ${SCRIPT_DIR}/rewrite.py"; exit 1; }
-  command -v python3 >/dev/null 2>&1 || { pack_err "错误: 需要 python3"; exit 1; }
-  [[ -f "${SESSION_JSONL}" ]] || { pack_err "错误: session 文件不存在: ${SESSION_JSONL}"; exit 1; }
-  python3 "${SCRIPT_DIR}/rewrite.py" "${SESSION_JSONL}" || { pack_err "错误: rewrite.py 退出非 0"; exit 1; }
   pack_out "====================步骤 1：导出会话并生成 doc/===================="
   bash "${BUILD_SH}" "${repo}" "${session}"
 else
-  pack_out "====================跳过步骤 1（含前置 rewrite，从步骤 ${step} 开始）===================="
+  pack_out "====================跳过步骤 1（从步骤 ${step} 开始）===================="
 fi
 
 # 步骤 2：复制项目代码
@@ -123,9 +117,22 @@ else
   pack_out "====================跳过步骤 3===================="
 fi
 
-# 步骤 4：压缩输出目录
+# 步骤 4：交互改写会话 JSONL 后压缩输出目录
 if ((step <= 4)); then
-  pack_out "====================步骤 4：压缩输出目录===================="
+  pack_out "====================步骤 4：rewrite 会话 JSONL===================="
+  repo_slug="${repo//_/-}"
+  session_jsonl="${HOME}/.claude/projects/-home-${USER}-projects-${repo_slug}/${session}.jsonl"
+  [[ -f "${REWRITE_PY}" ]] || { pack_err "错误: 未找到 rewrite.py: ${REWRITE_PY}"; exit 1; }
+  [[ -f "${session_jsonl}" ]] || {
+    pack_err "错误: 会话文件不存在（与 build.sh 路径规则一致）: ${session_jsonl}"
+    exit 1
+  }
+  pack_out "调用: python3 ${REWRITE_PY} ${session_jsonl}"
+  (cd "${SCRIPT_DIR}" && python3 "${REWRITE_PY}" "${session_jsonl}") || {
+    pack_err "错误: rewrite.py 退出非零"
+    exit 1
+  }
+  pack_out "====================步骤 4（续）：压缩输出目录===================="
   [[ -f "${ZIP_SH}" ]] || { pack_err "错误: 未找到 zip.sh"; exit 1; }
   bash "${ZIP_SH}" "${OUT}"
 else
