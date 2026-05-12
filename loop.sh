@@ -11,6 +11,7 @@
 #   会话日志单文件：默认 ./loop_logs/run__<REPO>__<RUN>.txt，恢复且已有 repo session 时为 repo__<session_id>__<RUN>.txt；
 #   可用 LOOP_LOG_DIR / LOOP_LOG_FILE 覆盖目录或完整路径。
 #   正式环境：会话日志里 Prompt/Result 为单行缩略（换行压空格，超出 LOOP_LOG_COMPACT_MAX 则末尾 ...）；mock 仍为完整多行。
+#   提问方 agent 调用 claude 时默认追加：--model claude-sonnet-4-6 --effort medium（可用 LOOP_AGENT_CLAUDE_MODEL / LOOP_AGENT_CLAUDE_EFFORT 覆盖）；repo 目录不调这两项。
 # =============================================================================
 #
 # 【这个脚本在干什么】
@@ -113,6 +114,10 @@ AGENT_SRC="${SCRIPT_DIR}/agent"
 AGENT_DIR="${SCRIPT_DIR}/agent-${REPO}"
 RENDER_PY="${SCRIPT_DIR}/loop_render_prompt.py"
 
+# 仅 cwd 为 agent-{repo}（提问方）时传给 claude 的默认模型与 effort；可用环境变量覆盖
+AGENT_CLAUDE_MODEL="${LOOP_AGENT_CLAUDE_MODEL:-claude-sonnet-4-6}"
+AGENT_CLAUDE_EFFORT="${LOOP_AGENT_CLAUDE_EFFORT:-medium}"
+
 # claude 调用失败时的重试次数（网络/模型偶发失败）
 MAX_TARGET_ATTEMPTS=4
 
@@ -180,10 +185,16 @@ mkdir -p "${WORK}"
 cleanup() { rm -rf "${WORK}"; }
 trap cleanup EXIT
 
-# 真实 claude 或 mock（见文件头「测试：不调用真实 AI」）
-_claude_invoke() {
+# 真实 claude 或 mock。第一个参数为 cwd（与 AGENT_DIR 比较）；仅 agent 侧且非 mock 时追加 --model / --effort
+_claude_invoke_with_cwd() {
+  local cwd="$1"
+  shift
   if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
     bash "${SCRIPT_DIR}/testing/mock_claude.sh" "$@"
+    return
+  fi
+  if [[ "${cwd}" == "${AGENT_DIR}" ]]; then
+    command claude --model "${AGENT_CLAUDE_MODEL}" --effort "${AGENT_CLAUDE_EFFORT}" "$@"
   else
     command claude "$@"
   fi
@@ -323,7 +334,7 @@ _claude_json_first() {
     loop_out "  [json-first] 尝试 ${attempt}/${MAX_TARGET_ATTEMPTS} cwd=${cwd}"
     # 临时关闭 -e：我们要自己判断 claude 的退出码，而不是让它直接杀脚本
     set +e
-    raw="$(cd "${cwd}" && _claude_invoke --output-format json -p "${prompt}" 2>&1)"
+    raw="$(cd "${cwd}" && _claude_invoke_with_cwd "${cwd}" --output-format json -p "${prompt}" 2>&1)"
     local ex=$?
     set -e
     if [[ "${ex}" -ne 0 ]]; then
@@ -363,7 +374,7 @@ _claude_resume_text() {
     loop_out "  [resume] 尝试 ${attempt}/${MAX_TARGET_ATTEMPTS} cwd=${cwd}"
     # 与 json-first 相同：先关 -e，自行处理 claude 退出码
     set +e
-    raw="$(cd "${cwd}" && _claude_invoke -r "${sid}" -c -p "${prompt}" 2>&1)"
+    raw="$(cd "${cwd}" && _claude_invoke_with_cwd "${cwd}" -r "${sid}" -c -p "${prompt}" 2>&1)"
     ex=$?
     set -e
     if [[ "${ex}" -ne 0 ]]; then
