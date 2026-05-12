@@ -119,7 +119,9 @@ if [[ "${prompt}" == *提出2个新的问题* ]]; then
 fi
 
 # 其余 resume：按「题目」形态选后缀，便于区分 repo 在答哪一类题
-if [[ "${prompt}" == L2-Q-* ]]; then
+if [[ "${prompt}" == SUM-Q-* ]]; then
+  _mock_answer_suffix "REPO_SUM"
+elif [[ "${prompt}" == L2-Q-* ]]; then
   _mock_answer_suffix "REPO_L2"
 elif [[ "${prompt}" == L1-Q-* ]]; then
   _mock_answer_suffix "REPO_L1"

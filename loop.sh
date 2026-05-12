@@ -536,7 +536,7 @@ TRANSCRIPT_ALL=""
 #        3.2.2 把 q/a 填进 PromptDeeper.md（占位符 {views} 为随机 2–4 个分析角度），agent 侧生成更深子题列表
 #        3.2.3 每个子题再问 repo（每条子题都使计数 +1）
 #        3.2.3b（可选）每条子题后以 LOOP_DEEPER2_PROB 概率再跑 PromptDeeper → 二层子题
-#        3.2.4（若未满 35）用 PromptSummary 让 repo 总结本轮 transcript
+#        3.2.4（若未满阶段一目标）渲染 PromptSummary：先由 agent 生成 1 条汇总题，再由 repo 作答（仅 repo 计 1 次）
 #   入口题索引用 dr % 题数 轮询：dive 次数可能多于入口题条数，避免数组越界。
 # =============================================================================
 while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
@@ -697,11 +697,11 @@ while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
       fi
     done
 
-    # Summary 也算 repo 侧一次用户消息 → 计数 +1；若已达阶段一目标则整段 Summary 跳过
+    # Summary：repo 侧只计 1 次（回答汇总题）；汇总题由 agent 根据 PromptSummary 生成
     if [[ "${REPO_PROMPT_COUNT}" -ge "${PHASE1_TARGET}" ]]; then
       loop_out "已达阶段一目标，跳过 Summary"
     else
-      loop_out "3.2.4 PromptSummary -> repo"
+      loop_out "3.2.4 PromptSummary -> agent 生成汇总题 -> repo 作答"
       printf '%s' "${TRANSCRIPT_DIVE}" >"${WORK}/transcript_dive.txt"
       printf '%s' "$(_pick_views_text)" >"${WORK}/views_summary.txt"
       python3 "${RENDER_PY}" "${AGENT_DIR}/PromptSummary.md" "${WORK}/summary.md" \
@@ -709,13 +709,25 @@ while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
         "views=${WORK}/views_summary.txt" \
         "transcript=${WORK}/transcript_dive.txt"
       SUM_PROMPT="$(cat "${WORK}/summary.md")"
-      if ! _claude_resume_text "${TARGET_PATH}" "${SESSION_REPO}" "${SUM_PROMPT}"; then
+      if ! _claude_resume_text "${AGENT_DIR}" "${SESSION_AGENT}" "${SUM_PROMPT}"; then
+        loop_err "3.2.4 summary agent 生成题失败"
+        exit 1
+      fi
+      SUM_AGENT_OUT="${PARSE_TEXT}"
+      mapfile -t SUM_QS < <(_questions_from_text_to_lines "${SUM_AGENT_OUT}")
+      if [[ "${#SUM_QS[@]}" -gt 0 ]]; then
+        SUM_Q_ONE="${SUM_QS[0]}"
+      else
+        SUM_Q_ONE="$(_str_trim "${SUM_AGENT_OUT}")"
+      fi
+      loop_out "3.2.4 repo 汇总题: $(_preview_text "${SUM_Q_ONE}")"
+      if ! _claude_resume_text "${TARGET_PATH}" "${SESSION_REPO}" "${SUM_Q_ONE}"; then
         loop_err "3.2.4 summary repo 失败"
         exit 1
       fi
       ASUM="${PARSE_TEXT}"
       REPO_PROMPT_COUNT=$((REPO_PROMPT_COUNT + 1))
-      TRANSCRIPT_DIVE+=$'\nQ_summary:\n'"${SUM_PROMPT}"$'\nA_summary:\n'"${ASUM}"$'\n'
+      TRANSCRIPT_DIVE+=$'\nQ_summary_agent_prompt:\n'"${SUM_PROMPT}"$'\nA_summary_agent_gen:\n'"${SUM_AGENT_OUT}"$'\nQ_summary_repo:\n'"${SUM_Q_ONE}"$'\nA_summary:\n'"${ASUM}"$'\n'
     fi
 
     # $'\n' 是 bash 的 C 风格转义，表示真正的换行符
