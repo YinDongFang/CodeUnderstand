@@ -113,9 +113,7 @@ TOTAL_TARGET="${LOOP_TOTAL_TARGET:-38}"
 ENTRY_N_MIN="${LOOP_ENTRY_N_MIN:-4}"
 ENTRY_N_MAX="${LOOP_ENTRY_N_MAX:-5}"
 
-# 每个「大循环」里 dive into 执行几轮（每轮 = 3.2.1~3.2.4 一整条链）
-DIVE_ROUNDS_MIN="${LOOP_DIVE_ROUNDS_MIN:-2}"
-DIVE_ROUNDS_MAX="${LOOP_DIVE_ROUNDS_MAX:-3}"
+# 每个「大循环」里：PromptEntry 生成 ENTRY_N 条入口题（截断后实际条数为 DIVE_ROUNDS），对每条入口题各做 1 次 dive（DIVE_ROUNDS = 入口题条数，不再单独随机 dive 轮数）
 
 # 二层 deeper（再跑一轮 PromptDeeper → 新子题再问 repo）：
 #   LOOP_DEEPER2_PROB：0–100，每条一级 deeper 子题答完后「再触发一层」的概率；0=关闭（默认）
@@ -531,19 +529,16 @@ TRANSCRIPT_ALL=""
 # 每一轮「大循环」内部顺序：
 #   A) 用 sed 替换 PromptEntry.md 里的 {url}、{n}，在 agent-{repo} 里跑 claude → ENTRY_TEXT
 #   B) 从 ENTRY_TEXT 解析多行题目，只取前 ENTRY_N 行 → 数组 ENTRY_QUESTIONS
-#   C) 重复 DIVE_ROUNDS 次「dive」：
+#   C) DIVE_ROUNDS = 本轮入口题条数（= #ENTRY_QUESTIONS），对每条入口题依次做一次 dive（3.2.1~3.2.4）：
 #        3.2.1 在 TARGET_PATH 用入口题问 repo（json-first 或 -r 续聊）
 #        3.2.2 把 q/a 填进 PromptDeeper.md（占位符 {views} 为随机 2–4 个分析角度），agent 侧生成更深子题列表
 #        3.2.3 每个子题再问 repo（每条子题都使计数 +1）
 #        3.2.3b（可选）每条子题后以 LOOP_DEEPER2_PROB 概率再跑 PromptDeeper → 二层子题
-#        3.2.4（若未满阶段一目标）渲染 PromptSummary：先由 agent 生成 1 条汇总题，再由 repo 作答（仅 repo 计 1 次）
-#   入口题索引用 dr % 题数 轮询：dive 次数可能多于入口题条数，避免数组越界。
+#        3.2.4（若未满阶段一目标）渲染 PromptSummary：先由 agent 生成 2 条汇总题，再逐条由 repo 作答（每条计 1 次 repo）
 # =============================================================================
 while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
   # $(...)「命令替换」：执行子命令并把其标准输出字符串贴到当前位置
   ENTRY_N="$(_compute_entry_n)"
-  DIVE_ROUNDS="$(_rand_between "${DIVE_ROUNDS_MIN}" "${DIVE_ROUNDS_MAX}")"
-  loop_out "========== 大循环: repo_count=${REPO_PROMPT_COUNT}/${PHASE1_TARGET} entry_n=${ENTRY_N} dive_rounds=${DIVE_ROUNDS} =========="
 
   # sed 用 # 作分隔符，避免 TARGET_PATH（Windows 盘符等）里的 / 与 sed 默认 / 冲突
   PROMPT_ENTRY="$(sed -e "s#{url}#${TARGET_PATH}#g" -e "s#{n}#${ENTRY_N}#g" "${AGENT_DIR}/PromptEntry.md")"
@@ -584,15 +579,17 @@ while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
   fi
   loop_out "本轮入口题数: ${#ENTRY_QUESTIONS[@]}"
 
-  # dr：dive round 索引，从 0 到 DIVE_ROUNDS-1
+  DIVE_ROUNDS="${#ENTRY_QUESTIONS[@]}"
+  loop_out "========== 大循环: repo_count=${REPO_PROMPT_COUNT}/${PHASE1_TARGET} entry_n=${ENTRY_N} dive_rounds=${DIVE_ROUNDS}（=入口题条数）=========="
+
+  # dr：与入口题一一对应，第 dr 条题做一次 dive
   for ((dr = 0; dr < DIVE_ROUNDS; dr++)); do
     if [[ "${REPO_PROMPT_COUNT}" -ge "${PHASE1_TARGET}" ]]; then
       loop_out "已达阶段一目标，提前结束本轮 dive"
       break
     fi
-    idx=$((dr % ${#ENTRY_QUESTIONS[@]}))
-    q="${ENTRY_QUESTIONS[idx]}"
-    loop_out "---------- dive $((dr + 1))/${DIVE_ROUNDS}（入口题 $((idx + 1))）----------"
+    q="${ENTRY_QUESTIONS[dr]}"
+    loop_out "---------- dive $((dr + 1))/${DIVE_ROUNDS}（入口题 $((dr + 1))）----------"
     loop_out "3.2.1 repo Q: $(_preview_text "${q}")"
 
     # 答题方 repo：同样「首次 json-first，之后 -r 续聊」
@@ -697,11 +694,11 @@ while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
       fi
     done
 
-    # Summary：repo 侧只计 1 次（回答汇总题）；汇总题由 agent 根据 PromptSummary 生成
+    # Summary：agent 生成 2 条汇总题；repo 逐条回答，每条使 REPO_PROMPT_COUNT +1
     if [[ "${REPO_PROMPT_COUNT}" -ge "${PHASE1_TARGET}" ]]; then
       loop_out "已达阶段一目标，跳过 Summary"
     else
-      loop_out "3.2.4 PromptSummary -> agent 生成汇总题 -> repo 作答"
+      loop_out "3.2.4 PromptSummary -> agent 生成 2 条汇总题 -> repo 逐条作答"
       printf '%s' "${TRANSCRIPT_DIVE}" >"${WORK}/transcript_dive.txt"
       printf '%s' "$(_pick_views_text)" >"${WORK}/views_summary.txt"
       python3 "${RENDER_PY}" "${AGENT_DIR}/PromptSummary.md" "${WORK}/summary.md" \
@@ -715,19 +712,39 @@ while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
       fi
       SUM_AGENT_OUT="${PARSE_TEXT}"
       mapfile -t SUM_QS < <(_questions_from_text_to_lines "${SUM_AGENT_OUT}")
-      if [[ "${#SUM_QS[@]}" -gt 0 ]]; then
-        SUM_Q_ONE="${SUM_QS[0]}"
+      TRANSCRIPT_DIVE+=$'\nQ_summary_agent_prompt:\n'"${SUM_PROMPT}"$'\nA_summary_agent_gen:\n'"${SUM_AGENT_OUT}"$'\n'
+      if [[ "${#SUM_QS[@]}" -eq 0 ]]; then
+        sq="$(_str_trim "${SUM_AGENT_OUT}")"
+        if [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; then
+          loop_out "3.2.4 repo 汇总题（单行回退）: $(_preview_text "${sq}")"
+          if ! _claude_resume_text "${TARGET_PATH}" "${SESSION_REPO}" "${sq}"; then
+            loop_err "3.2.4 summary repo 失败"
+            exit 1
+          fi
+          ASUM="${PARSE_TEXT}"
+          REPO_PROMPT_COUNT=$((REPO_PROMPT_COUNT + 1))
+          printf -v BLOCK "Q_summary_repo_1:\n%s\nA_summary_1:\n%s\n" "${sq}" "${ASUM}"
+          TRANSCRIPT_DIVE+="${BLOCK}"
+        fi
       else
-        SUM_Q_ONE="$(_str_trim "${SUM_AGENT_OUT}")"
+        si=0
+        for sq in "${SUM_QS[@]}"; do
+          si=$((si + 1))
+          if [[ "${REPO_PROMPT_COUNT}" -ge "${PHASE1_TARGET}" ]]; then
+            loop_out "已达阶段一目标，跳过剩余 summary 子题"
+            break
+          fi
+          loop_out "3.2.4 repo 汇总子题 ${si}: $(_preview_text "${sq}")"
+          if ! _claude_resume_text "${TARGET_PATH}" "${SESSION_REPO}" "${sq}"; then
+            loop_err "3.2.4 summary repo 失败"
+            exit 1
+          fi
+          ASUM="${PARSE_TEXT}"
+          REPO_PROMPT_COUNT=$((REPO_PROMPT_COUNT + 1))
+          printf -v BLOCK "Q_summary_repo_%s:\n%s\nA_summary_%s:\n%s\n" "${si}" "${sq}" "${si}" "${ASUM}"
+          TRANSCRIPT_DIVE+="${BLOCK}"
+        done
       fi
-      loop_out "3.2.4 repo 汇总题: $(_preview_text "${SUM_Q_ONE}")"
-      if ! _claude_resume_text "${TARGET_PATH}" "${SESSION_REPO}" "${SUM_Q_ONE}"; then
-        loop_err "3.2.4 summary repo 失败"
-        exit 1
-      fi
-      ASUM="${PARSE_TEXT}"
-      REPO_PROMPT_COUNT=$((REPO_PROMPT_COUNT + 1))
-      TRANSCRIPT_DIVE+=$'\nQ_summary_agent_prompt:\n'"${SUM_PROMPT}"$'\nA_summary_agent_gen:\n'"${SUM_AGENT_OUT}"$'\nQ_summary_repo:\n'"${SUM_Q_ONE}"$'\nA_summary:\n'"${ASUM}"$'\n'
     fi
 
     # $'\n' 是 bash 的 C 风格转义，表示真正的换行符

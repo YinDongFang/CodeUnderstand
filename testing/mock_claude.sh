@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 供 loop.sh 在 LOOP_USE_MOCK_CLAUDE=1 时替换真实 claude；只写 stdout/stderr。
-# 题目：MD5(完整 prompt) + 递增序号，带前缀区分场景（ENTRY / L1 一层 deeper / L2 二层 deeper / SUM / FINAL）。
+# 题目：MD5(完整 prompt) + 递增序号，带前缀区分场景（ENTRY / L1 / L2 / SUM×2 / FINAL）。
 # 答案：在作为「题目」的 prompt 正文后拼接固定后缀（便于与题目区分）。
 # 依赖：bash, jq；序号文件由 loop.sh 设置 LOOP_MOCK_SEQ_FILE
 set -eu
@@ -90,6 +90,11 @@ if _is_prompt_entry "${prompt}"; then
   exit 0
 fi
 
+# PromptSummary：含「汇总以上」且要求 2 题，与 PromptDeeper 的「提出2个」区分
+_is_prompt_summary() {
+  [[ "$1" == *汇总以上* ]] && [[ "$1" == *提出2个新的问题* ]]
+}
+
 if [[ "${prompt}" == *最后一个* ]] && [[ "${prompt}" == *综合性* ]]; then
   h="$(_md5_32 "${prompt}")"
   s="$(_next_seq)"
@@ -97,10 +102,11 @@ if [[ "${prompt}" == *最后一个* ]] && [[ "${prompt}" == *综合性* ]]; then
   exit 0
 fi
 
-if [[ "${prompt}" == *提出1个新的问题* ]]; then
+if _is_prompt_summary "${prompt}"; then
   h="$(_md5_32 "${prompt}")"
-  s="$(_next_seq)"
-  printf 'SUM-Q-%s-%s\n' "${h}" "${s}"
+  s1="$(_next_seq)"
+  s2="$(_next_seq)"
+  printf 'SUM-Q-%s-%s\nSUM-Q-%s-%s\n' "${h}" "${s1}" "${h}" "${s2}"
   exit 0
 fi
 
