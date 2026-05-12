@@ -7,9 +7,9 @@
 #   测试：export LOOP_USE_MOCK_CLAUDE=1；不调用真实 claude，改用 testing/mock_claude.sh；仍需要 jq、python3。
 #   切回正式：unset LOOP_USE_MOCK_CLAUDE（或 export LOOP_USE_MOCK_CLAUDE=0）后照常执行即可。
 #   测试常用：export LOOP_PHASE1_TARGET=4 LOOP_TOTAL_TARGET=6 缩短路径；
-#             export LOOP_MOCK_DUMP_DIR=./out/mock1 指定落盘目录（默认 ./loop_mock_prompts/<REPO>_$$/）。
 #             export LOOP_MOCK_USE_JSONL_RESUME=1 若要在 mock 下仍走 ~/.claude jsonl 恢复逻辑。
-#   mock 每次调用会在 LOOP_MOCK_DUMP_DIR 下生成 0001_json_first.prompt.txt、.response.json 或 0002_resume.prompt.txt、.response.txt 等，便于核对 prompt 与假输出。
+#   会话日志单文件：默认 ./loop_logs/run__<REPO>__<RUN>.txt，恢复且已有 repo session 时为 repo__<session_id>__<RUN>.txt；
+#   可用 LOOP_LOG_DIR / LOOP_LOG_FILE 覆盖目录或完整路径。
 # =============================================================================
 #
 # 【这个脚本在干什么】
@@ -178,10 +178,54 @@ _claude_invoke() {
   fi
 }
 
+# 根据 cwd 判断是提问方（Agent）还是答题仓库（Repo）
+_loop_infer_side() {
+  local cwd="$1"
+  if [[ "${cwd}" == "${TARGET_PATH}" ]]; then
+    printf '%s' "Repo"
+  elif [[ "${cwd}" == "${AGENT_DIR}" ]]; then
+    printf '%s' "Agent"
+  else
+    printf '%s' "Unknown"
+  fi
+}
+
+# 追加一条「Prompt / Result」块到会话日志（单文件；LOOP_LOG_FILE 在 main 中初始化）
+_loop_log_turn() {
+  [[ -z "${LOOP_LOG_FILE:-}" ]] && return 0
+  local role="$1" p="$2" r="$3"
+  {
+    printf '%s\n' "====================="
+    printf '%s\n\n' "${role}"
+    printf '%s\n' "Prompt："
+    printf '%s\n\n' "${p}"
+    printf '%s\n' "Result："
+    printf '%s\n\n' "${r}"
+  } >>"${LOOP_LOG_FILE}"
+}
+
+# 首次拿到 repo session_id 后，将 run__*.txt 重命名为 repo__<session>__*.txt，便于与 session 关联
+_loop_log_bind_repo_session() {
+  [[ -z "${SESSION_REPO}" || -z "${LOOP_LOG_FILE:-}" ]] && return 0
+  local base parent want
+  parent="$(dirname "${LOOP_LOG_FILE}")"
+  base="$(basename "${LOOP_LOG_FILE}")"
+  [[ "${base}" == repo__* ]] && return 0
+  want="${parent}/repo__${SESSION_REPO}__${RUN_ID}.txt"
+  if [[ -e "${want}" && "${LOOP_LOG_FILE}" != "${want}" ]]; then
+    want="${parent}/repo__${SESSION_REPO}__${REPO}__${RUN_ID}.txt"
+  fi
+  if [[ "${LOOP_LOG_FILE}" != "${want}" ]]; then
+    if mv -f "${LOOP_LOG_FILE}" "${want}" 2>/dev/null; then
+      LOOP_LOG_FILE="${want}"
+      export LOOP_LOG_FILE
+      loop_out "会话日志已关联 repo session: ${LOOP_LOG_FILE}"
+    fi
+  fi
+}
+
 if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
-  export LOOP_MOCK_DUMP_DIR="${LOOP_MOCK_DUMP_DIR:-${SCRIPT_DIR}/loop_mock_prompts/${RUN_ID}}"
-  mkdir -p "${LOOP_MOCK_DUMP_DIR}"
-  loop_out "LOOP_USE_MOCK_CLAUDE=1 MOCK_DUMP=${LOOP_MOCK_DUMP_DIR}"
+  loop_out "LOOP_USE_MOCK_CLAUDE=1（会话日志仍写入 LOOP_LOG_FILE）"
 fi
 
 # 把模型返回的一整段文字「拆成一行一行的题目」：
@@ -276,6 +320,7 @@ _claude_json_first() {
     out="$(jq -r '.result|if .==null then "" elif type=="string" then . elif type=="boolean" or type=="number" then tostring else tojson end' <<<"${doc}")"
     PARSE_SID="${sid}"
     PARSE_TEXT="${out}"
+    _loop_log_turn "$(_loop_infer_side "${cwd}")" "${prompt}" "${out}"
     return 0
   done
   return 1
@@ -301,6 +346,7 @@ _claude_resume_text() {
       continue
     fi
     PARSE_TEXT="${raw}"
+    _loop_log_turn "$(_loop_infer_side "${cwd}")" "${prompt}" "${raw}"
     return 0
   done
   return 1
@@ -439,6 +485,18 @@ if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" && -z "${LOOP_MOCK_USE_JSONL_RESUME:-}" ]];
   loop_out "Mock：已忽略 jsonl 恢复（LOOP_MOCK_USE_JSONL_RESUME=1 可保留）"
 fi
 
+# ---------- 会话日志（MOCK/正式共用，单 txt；文件名含 RUN_ID，拿到 repo session 后尽量改为 repo__<id>__）----------
+LOOP_LOG_DIR="${LOOP_LOG_DIR:-${SCRIPT_DIR}/loop_logs}"
+mkdir -p "${LOOP_LOG_DIR}"
+if [[ -n "${SESSION_REPO}" ]]; then
+  LOOP_LOG_FILE="${LOOP_LOG_FILE:-${LOOP_LOG_DIR}/repo__${SESSION_REPO}__${RUN_ID}.txt}"
+else
+  LOOP_LOG_FILE="${LOOP_LOG_FILE:-${LOOP_LOG_DIR}/run__${REPO}__${RUN_ID}.txt}"
+fi
+: >"${LOOP_LOG_FILE}"
+export LOOP_LOG_FILE
+loop_out "会话日志: ${LOOP_LOG_FILE}"
+
 # 已经满 38：脚本唯一「成功 stdout」仍是打印 session_id，供外层 run.sh 等脚本捕获
 if [[ "${REPO_PROMPT_COUNT}" -ge "${TOTAL_TARGET}" ]]; then
   loop_out "已达 TOTAL_TARGET=${TOTAL_TARGET}，无需运行"
@@ -543,6 +601,7 @@ while [[ "${REPO_PROMPT_COUNT}" -lt "${PHASE1_TARGET}" ]]; do
       fi
       SESSION_REPO="${PARSE_SID}"
       A_REPO="${PARSE_TEXT}"
+      _loop_log_bind_repo_session
       loop_err "session_repo(uuid)=${SESSION_REPO}"
     else
       if ! _claude_resume_text "${TARGET_PATH}" "${SESSION_REPO}" "${q}"; then
