@@ -69,7 +69,7 @@ if [[ "${json_mode}" -eq 1 ]]; then
     body=""
     for _i in 1 2 3 4 5; do
       s="$(_next_seq)"
-      body+=$(printf 'ENTRY-Q-%s-%s\n' "${h}" "${s}")
+      body+="ENTRY-Q-${h}-${s}"$'\n'
     done
   else
     body="$(_mock_answer_suffix "JSONFIRST_REPO")"
@@ -84,7 +84,7 @@ if _is_prompt_entry "${prompt}"; then
   body=""
   for _i in 1 2 3 4 5; do
     s="$(_next_seq)"
-    body+=$(printf 'ENTRY-Q-%s-%s\n' "${h}" "${s}")
+    body+="ENTRY-Q-${h}-${s}"$'\n'
   done
   printf '%s' "${body}"
   exit 0

@@ -2,10 +2,10 @@
 """Render prompt templates with multi-line replacements.
 
 Usage:
-  loop_render_prompt.py <template.md> <output.md> <key>=<path-to-file> ...
+  loop_render_prompt.py <template.md> <output.md> key=path [key=path ...]
 
-Each key matches literal placeholder {key} in the template (UTF-8).
-Values are read from files so answers can be arbitrarily long.
+Each ``key=path`` is one argv token; value is read from ``path``. Placeholders
+``{key}`` in the template are replaced (UTF-8).
 """
 from __future__ import annotations
 
@@ -14,17 +14,16 @@ import sys
 
 
 def main() -> int:
-    if len(sys.argv) < 4 or (len(sys.argv) - 2) % 2 != 0:
+    if len(sys.argv) < 4:
         sys.stderr.write(
-            "usage: loop_render_prompt.py template.md out.md key=path ...\n"
+            "usage: loop_render_prompt.py template.md out.md key=path [key=path ...]\n"
         )
         return 2
     template_path = pathlib.Path(sys.argv[1])
     out_path = pathlib.Path(sys.argv[2])
     pairs = sys.argv[3:]
     repl: dict[str, str] = {}
-    for i in range(0, len(pairs), 2):
-        spec = pairs[i]
+    for spec in pairs:
         if "=" not in spec:
             sys.stderr.write(f"bad pair (need key=path): {spec!r}\n")
             return 2
