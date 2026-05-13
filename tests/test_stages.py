@@ -77,26 +77,38 @@ def test_bootstrap_propagates_failure(isolated_env):
         assert "download" in str(exc.value)
 
 
-def test_run_conversation_skips_loop_when_cu_skip_loop(isolated_env, monkeypatch):
-    """CU_SKIP_LOOP=1 时不应调用 loop.sh，仍调用 clean/build（此处继续 mock）。"""
-    monkeypatch.setenv("CU_SKIP_LOOP", "1")
-    monkeypatch.setenv("CU_STUB_SESSION_ID", "deadbeef-0000-0000-0000-000000000000")
+def test_run_conversation_runs_loop_with_cu_test_mode_overlay(isolated_env, monkeypatch):
+    """CU_TEST_MODE=1 时仍执行 loop.sh；stage_env 向子进程注入 *USE_MOCK_CLAUDE。"""
+    monkeypatch.setenv("CU_TEST_MODE", "1")
 
     from cu import stages as st
     from cu.sandbox import bootstrap_sandbox
-    from cu.paths import code_dir
+    from cu.paths import code_dir, sandbox_home
 
-    jid = "conv-skip"
+    jid = "conv-mock"
     repo = "demo-repo"
+    session_id = "deadbeef-0000-0000-0000-000000000000"
     bootstrap_sandbox(jid)
     os.makedirs(code_dir(jid, repo), exist_ok=True)
 
     scripts: list[str] = []
 
     def fake_run_script(script, args=None, **kwargs):
+        env = kwargs.get("env") or {}
         scripts.append(script)
         if script.endswith("loop.sh"):
-            raise AssertionError("loop.sh must not be invoked when CU_SKIP_LOOP=1")
+            assert env.get("LOOP_USE_MOCK_CLAUDE") == "1"
+            assert env.get("BUILD_USE_MOCK_CLAUDE") == "1"
+            assert env.get("CLASSIFY_USE_MOCK_CLAUDE") == "1"
+            sandbox = sandbox_home(jid)
+            proj = os.path.join(sandbox, ".claude", "projects", "mock-proj")
+            os.makedirs(proj, exist_ok=True)
+            with open(os.path.join(proj, f"{session_id}.jsonl"), "w") as f:
+                f.write("{}\n")
+            return RunResult(0, f"info\n{session_id}\n", "")
+        if script.endswith("build.sh"):
+            assert env.get("BUILD_USE_MOCK_CLAUDE") == "1"
+            assert env.get("BUILD_DOC_ONLY") == "1"
         return RunResult(0, "", "")
 
     def fake_run_python(script, args=None, **kwargs):
@@ -114,17 +126,16 @@ def test_run_conversation_skips_loop_when_cu_skip_loop(isolated_env, monkeypatch
     )
     st.run_conversation(ctx)
 
-    assert ctx.session_id == "deadbeef-0000-0000-0000-000000000000"
-    assert "stub-loop-project" in ctx.claude_project_dir.replace("\\", "/")
+    assert ctx.session_id == session_id
+    assert "mock-proj" in ctx.claude_project_dir.replace("\\", "/")
 
     bases = [os.path.basename(p) for p in scripts]
-    assert "loop.sh" not in bases
-    assert "build.sh" in bases
-    assert any(os.path.basename(p) == "clean.py" for p in scripts)
+    assert bases == ["loop.sh", "clean.py", "build.sh"]
 
 
 def test_full_pipeline_mock(isolated_env, monkeypatch):
     """mock 全链：4 阶段顺序调用，conversation 后注入 CLAUDE_PROJECT_DIR。"""
+    monkeypatch.setenv("CU_TEST_MODE", "1")
     from cu import stages as st
     from cu.paths import sandbox_home
 
@@ -139,6 +150,7 @@ def test_full_pipeline_mock(isolated_env, monkeypatch):
         calls.append(("script", script, list(args or []), dict(env or {})))
         from cu.runner import RunResult
         if script.endswith("loop.sh"):
+            assert (env or {}).get("LOOP_USE_MOCK_CLAUDE") == "1"
             sandbox = sandbox_home(job_id)
             proj = os.path.join(sandbox, ".claude", "projects", "encoded-cwd-x")
             os.makedirs(proj, exist_ok=True)
@@ -176,6 +188,7 @@ def test_full_pipeline_mock(isolated_env, monkeypatch):
 
     build_call = calls[3]
     assert build_call[3].get("BUILD_DOC_ONLY") == "1"
+    assert build_call[3].get("BUILD_USE_MOCK_CLAUDE") == "1"
     assert build_call[3].get("CLAUDE_PROJECT_DIR", "").endswith("encoded-cwd-x")
 
     export_call = calls[6]

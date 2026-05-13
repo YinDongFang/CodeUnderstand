@@ -1,9 +1,22 @@
 # P2 · 编排器 API 速查表
 
 > 实现 commit 链：见 `mindflow` 分支 `5ae8a8d` 以后的 14 个提交。
-> 适用版本：`code-understand 0.2.0`。
+> 适用版本：`code-understand 0.3.0`。
 
 ---
+
+## P3 · Web UI（补充端点）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/v1/jobs/{job_id}/events` | SSE（`text/event-stream`）；首帧 comment；事件 `data:` JSON `ts`,`stage`,`message` |
+| `GET` | `/api/v1/jobs/{job_id}/rewrite/questions` | 即时解析会话 JSONL 的题目列表 `{ "lines": [...] }`（需 `compile` success）|
+| `PUT` | `/api/v1/jobs/{job_id}/rewrite/questions` | `{"lines":[...]}` 直接写回会话（同上）|
+| `GET` | `/api/v1/jobs/{job_id}/artifacts/zip` | 返回 `zip` 文件下载（不存在则 404）|
+| `GET` | `/api/v1/meta` | `{ version, web_ui }` |
+
+- **触发 `POST .../stages/build/run` / `rerun`**（经由当前进程 API）且 **stage=`build`** 时，服务端会在 **export+zip** 前自动跑一次 **`rewrite.py --stdin-lines`**（stdin 投喂当前会话题目，常为幂等等同写回）。**CLI `cu run` 不受影响**。
+- **`GET/`**：若构建了 `web/dist/index.html`，`cu serve` 同时托管静态 UI（SPA Hash 路由 `#/`）。
 
 ## CLI 子命令
 
@@ -36,10 +49,7 @@ cu serve [--host HOST] [--port PORT]
 | `POST` | `/jobs/{job_id}/cancel` | 取消运行中作业（SIGTERM 当前子进程） | 404 无运行中 |
 | `DELETE` | `/jobs/{job_id}` | 删除作业（取消 + 清沙箱与快照 + DB CASCADE） | 404 |
 
-P3 将在此基础上新增：
-- `GET /api/v1/jobs/{job_id}/events`（SSE 实时进度）
-- `POST /api/v1/jobs/{job_id}/rewrite`（多轮交互编辑）
-- 静态 Web UI
+P3 **新增**的路径与语义见本节上方 **「P3 · Web UI（补充端点）」**；`JobDTO` 含 `artifact_zip_path`（若 zip 尚未生成则为空字符串）。
 
 ---
 

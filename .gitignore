@@ -10,3 +10,5 @@ __pycache__/
 
 # setuptools / pip editable install metadata (local)
 *.egg-info/
+
+/web/node_modules

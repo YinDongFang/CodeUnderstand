@@ -28,9 +28,12 @@ def _spawn_and_wait(
     timeout: int | None,
     stream: bool,
     pid_sink: PidSink,
+    stdin_data: str | bytes | None = None,
 ) -> RunResult:
-    """统一通过 Popen 启动子进程，立即抛 PID 给 pid_sink；wait/communicate 等收尾。"""
+    """统一通过 Popen 启动子进程；``stdin_data`` 仅在非 stream 模式下写入。"""
     if stream:
+        if stdin_data is not None:
+            raise ValueError("stream=True 不支持 stdin_data")
         proc = subprocess.Popen(cmd, env=env, cwd=cwd)
         if pid_sink is not None:
             pid_sink(proc.pid)
@@ -42,26 +45,27 @@ def _spawn_and_wait(
             proc.wait()
             return RunResult(returncode=-1, stdout="", stderr=f"timeout after {timeout}s")
 
+    stdin_arg = subprocess.PIPE if stdin_data is not None else None
+    text_mode = stdin_data is None or isinstance(stdin_data, str)
     proc = subprocess.Popen(
         cmd, env=env, cwd=cwd,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdin=stdin_arg,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=text_mode,
     )
     if pid_sink is not None:
         pid_sink(proc.pid)
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-        return RunResult(
-            returncode=proc.returncode,
-            stdout=stdout or "",
-            stderr=stderr or "",
-        )
+        stdout, stderr = proc.communicate(input=stdin_data, timeout=timeout)
+        rc = proc.returncode if proc.returncode is not None else -1
+        return RunResult(returncode=rc, stdout=stdout or "", stderr=stderr or "")
     except subprocess.TimeoutExpired:
         proc.kill()
         stdout, stderr = proc.communicate()
+        tail = stderr or stdout or ""
         return RunResult(
             returncode=-1,
             stdout=stdout or "",
-            stderr=(stderr or "") + f"\ntimeout after {timeout}s",
+            stderr=tail + f"\ntimeout after {timeout}s",
         )
 
 
@@ -79,7 +83,7 @@ def run_script(
     return _spawn_and_wait(
         ["bash", script] + (args or []),
         env=env, cwd=cwd, timeout=timeout,
-        stream=stream, pid_sink=pid_sink,
+        stream=stream, pid_sink=pid_sink, stdin_data=None,
     )
 
 
@@ -92,10 +96,12 @@ def run_python(
     timeout: int | None = None,
     stream: bool = False,
     pid_sink: PidSink = None,
+    stdin_data: str | bytes | None = None,
 ) -> RunResult:
-    """通过 python3 解释器执行脚本。"""
+    """通过 python3 解释器执行脚本。``stdin_data`` 写入子进程 stdin（仅非 ``stream`` 模式）。"""
     return _spawn_and_wait(
         ["python3", script] + (args or []),
         env=env, cwd=cwd, timeout=timeout,
         stream=stream, pid_sink=pid_sink,
+        stdin_data=stdin_data,
     )

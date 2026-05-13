@@ -7,11 +7,15 @@
 #
 # 环境变量（默认与 pack.sh 一致）: OUTPUTS_DIR, PROJECTS_DIR
 # 可选: BUILD_DOC_ONLY=1 仅生成 doc/，跳过 session 复制与归一化（用于沙箱编排器的 conversation 阶段）
+# 可选: BUILD_USE_MOCK_CLAUDE=1 或上位 CU_TEST_MODE=1（见 cu.test_mode → stage_env）时用 testing/mock_claude.sh，
+#       不写真实 Claude；成功后若 doc/ 仍空则写入 4 个最小占位 Markdown。
 # 依赖: bash, cp, mkdir, jq, claude, shuf
 set -euo pipefail
 
 : "${OUTPUTS_DIR:=${HOME}/outputs}"
 : "${PROJECTS_DIR:=${HOME}/projects}"
+
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 build_out() { printf '[build.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 build_err() { printf '[build.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -169,10 +173,15 @@ rc=1
 for ((attempt = 1; attempt <= MAX_CLAUDE_ATTEMPTS; attempt++)); do
   build_out "claude --resume ${session}（第 ${attempt}/${MAX_CLAUDE_ATTEMPTS} 次）"
   set +e
-  # claude 标准输出/错误丢弃，不打控制台、不写日志文件
-  (cd -- "${PROJECT_DIR}" && printf '%s' "${prompt}" | claude -p \
-    --allowedTools "Edit,Write,Read,Bash,MultiEdit" \
-    --resume "${session}") >/dev/null 2>&1
+  # claude 标准输出/错误丢弃；mock 时必须把 prompt 放到最后一参（mock_claude.sh 语义）
+  if [[ "${BUILD_USE_MOCK_CLAUDE:-}" == "1" ]]; then
+    (cd -- "${PROJECT_DIR}" && "${SCRIPT_ROOT}/testing/mock_claude.sh" \
+      -p --allowedTools "Edit,Write,Read,Bash,MultiEdit" --resume "${session}" "${prompt}") >/dev/null 2>&1
+  else
+    (cd -- "${PROJECT_DIR}" && printf '%s' "${prompt}" | claude -p \
+      --allowedTools "Edit,Write,Read,Bash,MultiEdit" \
+      --resume "${session}") >/dev/null 2>&1
+  fi
   rc=$?
   set -e
   if [[ "${rc}" -eq 0 ]]; then
@@ -184,6 +193,18 @@ done
 if [[ "${rc}" -ne 0 ]]; then
   build_err "claude 在 ${MAX_CLAUDE_ATTEMPTS} 次尝试后仍失败，最后退出码: ${rc}"
   exit "${rc}"
+fi
+
+if [[ "${BUILD_USE_MOCK_CLAUDE:-}" == "1" ]]; then
+  stub_docs=(overview.md architecture.md implementation.md deployment.md)
+  wrote=0
+  for fname in "${stub_docs[@]}"; do
+    if [[ ! -f "${doc_abs_path}/${fname}" ]]; then
+      printf '# %s (mock)\n\n占位文档（BUILD_USE_MOCK_CLAUDE=1）。\n' "${fname%.md}" >"${doc_abs_path}/${fname}"
+      wrote=$((wrote + 1))
+    fi
+  done
+  [[ "${wrote}" -gt 0 ]] && build_out "已写入 ${wrote} 个占位 doc/*.md（mock 模式）"
 fi
 
 build_out "文档生成完成"

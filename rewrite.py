@@ -234,12 +234,20 @@ def main() -> int:
     )
     ap.add_argument(
         "--non-interactive", action="store_true",
-        help="跳过 gedit，直接读取已存在的 tmp 文件并写回",
+        help="跳过 gedit，读取 tmp 或由 --stdin-lines 读 stdin JSON",
+    )
+    ap.add_argument(
+        "--stdin-lines", action="store_true",
+        help="仅在 --non-interactive 下：从 stdin 读 UTF-8 JSON 对象 {\"lines\":[\"题目\",...]}，跳过 tmp（无磁盘题面草稿）",
     )
     args = ap.parse_args()
     repo = (args.repo or "").strip()
     if not repo or "/" in repo or ".." in repo:
         print("错误: repo 非法（须非空且不能含 / 或 ..）", file=sys.stderr)
+        return 1
+
+    if args.stdin_lines and not args.non_interactive:
+        print("错误: --stdin-lines 必须与 --non-interactive 同时使用", file=sys.stderr)
         return 1
 
     try:
@@ -275,25 +283,47 @@ def main() -> int:
         dump_questions_to_tmp(tmp_path, questions)
         print(f"已写入: {tmp_path}（共 {len(questions)} 条）")
         print("说明: 每行一条 JSON 字符串，顺序与会话中一致；仅改字符串内文字，勿增删行数。")
+    elif args.stdin_lines:
+        print("非交互模式：从 stdin 读取 {\"lines\":[...]} JSON")
     else:
         print(f"非交互模式：从已存在的 tmp 文件读取编辑结果: {tmp_path}")
 
     new_list: list[str] = []
     if args.non_interactive:
-        if not os.path.isfile(tmp_path):
-            print(
-                f"错误: --non-interactive 模式下 tmp 文件不存在: {tmp_path}",
-                file=sys.stderr,
-            )
-            return 1
-        try:
-            new_list = load_questions_from_tmp(tmp_path)
-        except ValueError as e:
-            print(f"读取编辑结果失败: {e}", file=sys.stderr)
-            return 1
+        if args.stdin_lines:
+            try:
+                blob = json.loads(sys.stdin.read())
+            except json.JSONDecodeError as e:
+                print(f"stdin JSON 解析失败: {e}", file=sys.stderr)
+                return 1
+            if not isinstance(blob, dict) or "lines" not in blob:
+                print(
+                    "错误: stdin JSON 须为对象且含 lines 键（题目字符串数组）",
+                    file=sys.stderr,
+                )
+                return 1
+            raw_lines = blob["lines"]
+            if not isinstance(raw_lines, list) or not all(
+                isinstance(x, str) for x in raw_lines
+            ):
+                print("错误: lines 须为字符串数组", file=sys.stderr)
+                return 1
+            new_list = list(raw_lines)
+        else:
+            if not os.path.isfile(tmp_path):
+                print(
+                    f"错误: --non-interactive 模式下 tmp 文件不存在: {tmp_path}",
+                    file=sys.stderr,
+                )
+                return 1
+            try:
+                new_list = load_questions_from_tmp(tmp_path)
+            except ValueError as e:
+                print(f"读取编辑结果失败: {e}", file=sys.stderr)
+                return 1
         if len(new_list) != len(questions):
             print(
-                f"错误: 编辑后有效行数为 {len(new_list)}，与原来的 {len(questions)} 不一致，未写回。",
+                f"错误: 编辑后有效条数为 {len(new_list)}，与原来的 {len(questions)} 不一致，未写回。",
                 file=sys.stderr,
             )
             return 1

@@ -101,3 +101,51 @@ def test_non_interactive_writes_back_single_source(tmp_path, monkeypatch):
     final = src.read_text(encoding="utf-8")
     assert new_q in final, f"new question not written back; file:\n{final}"
     assert original_q not in final, f"original question still present; file:\n{final}"
+
+
+def test_stdin_lines_non_interactive_writes_back(tmp_path, monkeypatch):
+    """--stdin-lines 无需 tmp_questions.txt 即可写回（P3 Web 路径）。"""
+    import json
+
+    repo = "stdinrepo"
+    session_id = "22222222-2222-2222-2222-222222222222"
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("CODE_UNDERSTAND_STATE_ROOT", str(fake_home))
+    monkeypatch.setenv("OUTPUTS_DIR", str(fake_home))
+    monkeypatch.setenv("SESSION_ID", session_id)
+
+    proj = fake_home / ".claude" / "projects" / "p-stdin"
+    proj.mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+
+    original_q = "Question from stdin-lines test?"
+    src = proj / f"{session_id}.jsonl"
+    src.write_text(
+        json.dumps({"type": "user", "message": {"content": original_q}}) + "\n",
+        encoding="utf-8",
+    )
+
+    new_q = "Updated via stdin-lines JSON pipe."
+    payload = json.dumps({"lines": [new_q]}).encode("utf-8")
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    proc = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(repo_root, "rewrite.py"),
+            repo,
+            "--single-source",
+            "--non-interactive",
+            "--stdin-lines",
+        ],
+        input=payload,
+        capture_output=True,
+        timeout=30,
+        env={**os.environ},
+    )
+    assert proc.returncode == 0, proc.stderr.decode()
+    final = src.read_text(encoding="utf-8")
+    assert new_q in final
+    assert original_q not in final

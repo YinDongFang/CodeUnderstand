@@ -1,5 +1,15 @@
 """Shared pytest fixtures."""
+import os
+
 import pytest
+
+
+def pytest_configure(config):
+    """未显式 export 时默认开启测试模式，使 stage_env() 注入 *USE_MOCK_CLAUDE。
+
+    必须用真实 Claude 的用例可在模块或测试中 ``monkeypatch.setenv('CU_TEST_MODE', '0')``。
+    """
+    os.environ.setdefault("CU_TEST_MODE", "1")
 
 
 @pytest.fixture

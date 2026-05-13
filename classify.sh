@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # 通过 Claude 结合 GitHub URL、README 摘要分析项目；stdout 仅输出一行 main_type（供 pack 等脚本捕获）；日志走 stderr。
-# 依赖：bash、mktemp、jq、claude
+# 可选: CLASSIFY_USE_MOCK_CLAUDE=1 或上位 CU_TEST_MODE=1 → testing/mock_claude.sh
+# 依赖：bash、mktemp、jq、claude（非 mock）
 set -euo pipefail
+
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 classify_err() { printf '[classify.sh][%s]%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
@@ -54,7 +57,12 @@ claude_tmp="$(mktemp)"
 trap 'rm -f -- "${claude_tmp}"' EXIT
 
 set +e
-claude -p --model "claude-sonnet-4-6" --effort "medium" "${query}" >"${claude_tmp}" 2>/dev/null
+if [[ "${CLASSIFY_USE_MOCK_CLAUDE:-}" == "1" ]]; then
+  "${SCRIPT_ROOT}/testing/mock_claude.sh" -p \
+    --model "claude-sonnet-4-6" --effort "medium" "${query}" >"${claude_tmp}" 2>/dev/null
+else
+  claude -p --model "claude-sonnet-4-6" --effort "medium" "${query}" >"${claude_tmp}" 2>/dev/null
+fi
 claude_exit=$?
 set -e
 [[ "${claude_exit}" -eq 0 ]] || classify_err "警告: claude 失败（${claude_exit}），输出默认 main_type"

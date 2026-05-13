@@ -175,11 +175,14 @@ def run_stage(
     *,
     end_stage: str | None = None,
     on_event=None,
+    api_web_build_rewrite: bool = False,
 ) -> threading.Thread:
     """启动指定阶段执行（后台线程）。依赖未满足抛 ValueError，作业不存在抛 KeyError。
 
     end_stage: 包含式结束阶段；None 表示一直跑到最后一个阶段（build）。
     on_event: 可选回调 (stage, message)，转交给 JobContext 让 stages.py fire。
+    api_web_build_rewrite: 若为 True且本线程将执行 ``build`` 宏阶段，则 ``JobContext.build_with_rewrite`` 在执行该段时为 True
+        （Web API 驱动的 build 会跑一次 ``rewrite.py --stdin-lines``，与 CLI ``cu run`` 默认仅凭 export 不同）。
     """
     if end_stage is not None:
         if end_stage not in JOB_STAGES:
@@ -195,6 +198,7 @@ def run_stage(
         raise ValueError(f"dependencies not met for stage {stage}: {status_map}")
     return _start_job_thread(
         job_id, start_from=stage, end_stage=end_stage, on_event=on_event,
+        api_web_build_rewrite=api_web_build_rewrite,
     )
 
 
@@ -203,6 +207,7 @@ def rerun_from(
     stage: str,
     *,
     on_event=None,
+    api_web_build_rewrite: bool = False,
 ) -> threading.Thread:
     """从 stage 重跑：恢复 post-prev 快照（若非 bootstrap）→ 把 stage..build 置 pending → 启动。"""
     rec = _get_job(job_id)
@@ -228,6 +233,7 @@ def rerun_from(
         _reset_stage(job_id, s)
     return _start_job_thread(
         job_id, start_from=stage, end_stage=None, on_event=on_event,
+        api_web_build_rewrite=api_web_build_rewrite,
     )
 
 
@@ -279,6 +285,7 @@ def _start_job_thread(
     start_from: str,
     end_stage: str | None = None,
     on_event=None,
+    api_web_build_rewrite: bool = False,
 ) -> threading.Thread:
     with _ACTIVE_LOCK:
         existing = _ACTIVE.get(job_id)
@@ -288,7 +295,10 @@ def _start_job_thread(
         pid_holder: list[int] = []
         t = threading.Thread(
             target=_run_thread,
-            args=(job_id, start_from, end_stage, cancel_flag, pid_holder, on_event),
+            args=(
+                job_id, start_from, end_stage, cancel_flag, pid_holder, on_event,
+                api_web_build_rewrite,
+            ),
             daemon=True,
             name=f"cu-job-{job_id}",
         )
@@ -306,11 +316,25 @@ def _run_thread(
     cancel_flag: threading.Event,
     pid_holder: list[int],
     on_event=None,
+    api_web_build_rewrite: bool = False,
 ) -> None:
     rec = _get_job(job_id)
     if rec is None:
         return
     _update_job(job_id, status="running")
+
+    from cu.events import publish_job_stage_event
+
+    def merged_on_event(stage_ev: str, message: str) -> None:
+        if on_event is not None:
+            try:
+                on_event(stage_ev, message)
+            except Exception:
+                pass
+        try:
+            publish_job_stage_event(job_id, stage_ev, message)
+        except Exception:
+            pass
 
     ctx = JobContext(
         job_id=rec.job_id,
@@ -320,7 +344,7 @@ def _run_thread(
         session_id=rec.session_id,
         claude_project_dir=rec.claude_project_dir,
         pid_sink=lambda pid: pid_holder.append(pid),
-        on_event=on_event,
+        on_event=merged_on_event,
     )
 
     idx_start = JOB_STAGES.index(start_from)
@@ -342,6 +366,7 @@ def _run_thread(
             )
             pid_holder.clear()
             try:
+                ctx.build_with_rewrite = api_web_build_rewrite and stage == "build"
                 STAGE_RUNNERS[stage](ctx)
             except Exception as e:
                 log_tail = str(e)[-2000:]

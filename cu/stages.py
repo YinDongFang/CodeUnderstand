@@ -1,21 +1,20 @@
 """4 宏阶段定义与执行逻辑。
 
 阶段序：bootstrap → conversation → compile → build
-每个阶段函数接收 JobContext，调用 bash/python 子进程并返回成功；失败抛 RuntimeError。
+每个阶段函数接收 JobContext，调用 bash/Python 子进程并返回成功；失败抛 RuntimeError。
 
-测试接缝（勿在生产依赖语义）：
-- ``CU_SKIP_LOOP``: 若为 ``1``/``true``/``yes``（大小写不敏感），跳过真实 ``loop.sh``，
-  在沙箱内写入最小 ``.jsonl`` 并设置 ``session_id`` / ``claude_project_dir``，
-  仍执行 ``clean.py`` 与 ``BUILD_DOC_ONLY`` 的 ``build.sh``。
-  可选 ``CU_STUB_SESSION_ID``（否则随机 UUID）；可选 ``CU_STUB_PROJECT_SLUG``（默认 ``stub-loop-project``）。
+子进程环境由 ``cu.env.stage_env()`` 组装。设置 ``CU_TEST_MODE=1``（见 ``cu.test_mode``）时，将注入
+``LOOP_USE_MOCK_CLAUDE`` / ``BUILD_USE_MOCK_CLAUDE`` / ``CLASSIFY_USE_MOCK_CLAUDE``，使 loop、doc 生成与
+分类等 Claude CLI 调用统一走 ``testing/mock_claude.sh``。
 """
 from __future__ import annotations
 
 import os
 import shutil
-import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
+
+import json
 
 from cu.paths import artifact_root, code_dir, sandbox_home
 from cu.sandbox import bootstrap_sandbox
@@ -40,6 +39,8 @@ class JobContext:
     claude_project_dir: str = ""
     on_event: EventCallback = None
     pid_sink: PidSink = None
+    #: API 驱动的 ``build`` 为 True：该段内先跑一次 ``rewrite.py --stdin-lines``（与 ``cu run`` 默认跳过不同）。
+    build_with_rewrite: bool = False
 
     def fire(self, stage: str, message: str) -> None:
         if self.on_event is not None:
@@ -49,24 +50,6 @@ class JobContext:
 def _repo_root() -> str:
     """本仓库的根目录（cu/ 的父目录）。"""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def _env_truthy(key: str) -> bool:
-    return os.environ.get(key, "").strip().lower() in ("1", "true", "yes")
-
-
-def _apply_skip_loop_stub(ctx: JobContext) -> None:
-    """在跳过 loop.sh 时补足 session 与 Claude 项目目录（供后续 clean/build 使用）。"""
-    sid_raw = os.environ.get("CU_STUB_SESSION_ID", "").strip()
-    ctx.session_id = sid_raw or str(uuid.uuid4())
-    slug = os.environ.get("CU_STUB_PROJECT_SLUG", "").strip() or "stub-loop-project"
-    sandbox = sandbox_home(ctx.job_id)
-    proj = os.path.join(sandbox, ".claude", "projects", slug)
-    os.makedirs(proj, exist_ok=True)
-    jsonl = os.path.join(proj, f"{ctx.session_id}.jsonl")
-    with open(jsonl, "w", encoding="utf-8") as f:
-        f.write("{}\n")
-    ctx.claude_project_dir = proj
 
 
 def _find_claude_project_dir(sandbox_home_path: str, session_id: str) -> str:
@@ -130,33 +113,29 @@ def run_conversation(ctx: JobContext) -> None:
     )
 
     ctx.fire("conversation", "step:loop")
-    if _env_truthy("CU_SKIP_LOOP"):
-        ctx.fire("conversation", "stub:skip-loop")
-        _apply_skip_loop_stub(ctx)
-    else:
-        result = run_script(
-            os.path.join(repo_root, "loop.sh"),
-            args=[target_path, ctx.repo],
-            env=env,
-            cwd=repo_root,
-            pid_sink=ctx.pid_sink,
+    result = run_script(
+        os.path.join(repo_root, "loop.sh"),
+        args=[target_path, ctx.repo],
+        env=env,
+        cwd=repo_root,
+        pid_sink=ctx.pid_sink,
+    )
+    _check(result, "conversation", "loop")
+
+    if not ctx.session_id:
+        lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+        if not lines:
+            raise RuntimeError("[conversation/loop] 未从 stdout 解析到 session_id")
+        ctx.session_id = lines[-1]
+
+    sandbox = sandbox_home(ctx.job_id)
+    found = _find_claude_project_dir(sandbox, ctx.session_id)
+    if not found:
+        raise RuntimeError(
+            f"[conversation/loop] 未在 {sandbox}/.claude/projects/ 下找到 "
+            f"包含 {ctx.session_id}.jsonl 的目录"
         )
-        _check(result, "conversation", "loop")
-
-        if not ctx.session_id:
-            lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
-            if not lines:
-                raise RuntimeError("[conversation/loop] 未从 stdout 解析到 session_id")
-            ctx.session_id = lines[-1]
-
-        sandbox = sandbox_home(ctx.job_id)
-        found = _find_claude_project_dir(sandbox, ctx.session_id)
-        if not found:
-            raise RuntimeError(
-                f"[conversation/loop] 未在 {sandbox}/.claude/projects/ 下找到 "
-                f"包含 {ctx.session_id}.jsonl 的目录"
-            )
-        ctx.claude_project_dir = found
+    ctx.claude_project_dir = found
 
     env = stage_env(
         job_id=ctx.job_id, repo=ctx.repo,
@@ -235,11 +214,44 @@ def run_compile(ctx: JobContext) -> None:
     ctx.fire("compile", "done")
 
 
-def run_build(ctx: JobContext) -> None:
-    """build 阶段：导出 session 到产物树并 zip。
+def _session_jsonl_path(ctx: JobContext) -> str:
+    if not ctx.claude_project_dir or not ctx.session_id:
+        raise RuntimeError("[build] 缺少 claude_project_dir 或 session_id")
+    sid = ctx.session_id
+    if sid.lower().endswith(".jsonl"):
+        sid = sid[:-6]
+    p = os.path.join(ctx.claude_project_dir, f"{sid}.jsonl")
+    if not os.path.isfile(p):
+        raise RuntimeError(f"[build] 会话 JSONL 不存在: {p}")
+    return p
 
-    P1 阶段尚未接入 rewrite 人工编辑入口，故跳过 rewrite.py；
-    rewrite 由 P3 Web UI 实现后再插入到 export_session 之前。
+
+def run_rewrite_stdin_mirror(ctx: JobContext, env: dict[str, str]) -> None:
+    """将当前会话中已抽取的题目经 stdin JSON 投喂 ``rewrite.py``，通常为幂等等同写回。"""
+    from cu.session_questions import extract_question_lines
+
+    path = _session_jsonl_path(ctx)
+    lines = extract_question_lines(path)
+    if not lines:
+        return
+    stdin_payload = json.dumps({"lines": lines}, ensure_ascii=False)
+    repo_root = _repo_root()
+    result = run_python(
+        os.path.join(repo_root, "rewrite.py"),
+        args=[ctx.repo, "--single-source", "--non-interactive", "--stdin-lines"],
+        env=env,
+        cwd=repo_root,
+        pid_sink=ctx.pid_sink,
+        stdin_data=stdin_payload,
+    )
+    _check(result, "build", "rewrite")
+
+
+def run_build(ctx: JobContext) -> None:
+    """build 阶段：可选 ``rewrite.py``（仅 API Web build）→ ``export_session`` → zip。
+
+    ``cu run`` 全流程中 ``JobContext.build_with_rewrite`` 为 False，跳过 rewrite，
+    与 P2 CLI 语义一致。
     """
     ctx.fire("build", "start")
     repo_root = _repo_root()
@@ -251,6 +263,10 @@ def run_build(ctx: JobContext) -> None:
         claude_project_dir=ctx.claude_project_dir,
     )
     env["ARTIFACT_ROOT"] = art
+
+    if ctx.build_with_rewrite:
+        ctx.fire("build", "step:rewrite")
+        run_rewrite_stdin_mirror(ctx, env)
 
     ctx.fire("build", "step:export-session")
     result = run_script(

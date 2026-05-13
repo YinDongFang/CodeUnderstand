@@ -45,7 +45,7 @@
 
 ### 3.2 运行期文件（不得进入上述产物根）
 
-- 日志、`loop_logs`、`tmp`（含 rewrite 用临时题目文件）、`agent-{repo}` 副本等，**一律直接放在假 `$HOME` 下固定子路径**（如 `$HOME/logs/`、`$HOME/loop_logs/`、`$HOME/tmp/`、`$HOME/agent-{repo}/` 等，实现时统一常量），**不采用**单独抽象 `CODE_UNDERSTAND_STATE_ROOT` 指向真实用户 `~/Documents` 等与真机家目录挂钩的方案。  
+- 日志、`loop_logs`、`tmp`（**非** rewrite 题库：题目真源仅为沙箱内 **单份** session JSONL；Web UI **`GET`** 对该文件即时解析，**保存**直接写回，不落 `$HOME/tmp/` 题面稿）、`agent-{repo}` 副本等，**一律直接放在假 `$HOME` 下固定子路径**（如 `$HOME/logs/`、`$HOME/loop_logs/`、`$HOME/tmp/`、`$HOME/agent-{repo}/` 等，实现时统一常量），**不采用**单独抽象 `CODE_UNDERSTAND_STATE_ROOT` 指向真实用户 `~/Documents` 等与真机家目录挂钩的方案。  
 - **作业根目录** 本身位于 **平台运行时数据根**（见 §3.4）下，与本仓库 git 工作树相互独立。  
 - **快照归档**（全量 tar 文件）放在 **假 `$HOME` 之外**（作业根目录下 `snapshots/`，见 §3.4 与第 6 节），避免 tar 整树时自包含。
 
@@ -88,9 +88,9 @@
 
 ## 5. rewrite 与单一会话
 
-- **隔离后**：rewrite 阶段 **只编辑一份**会话 JSONL（沙箱 `.claude/projects/...` 下与 `SESSION_ID` 对应文件）。  
-- **导出**：rewrite 审核通过后，**再** 导出到 **`$HOME/code-understand-{repo}/sessions/session1/session.jsonl`**（及所需子目录）。  
-- **多轮修改**：仍在宏阶段 `build` 内循环；不自动回滚更早宏阶段。
+- **隔离后**：rewrite **只对应一份**会话 JSONL（沙箱 `.claude/projects/...` 下与 `SESSION_ID` 对应文件）；题目列表 **`GET`** 时对其实时解析；人工编辑 **`PUT`/保存即写回**，**不设**题库用的临时磁盘文件（如 `$HOME/tmp/` 独立题面稿）。
+- **导出**：在上述会话内容确定后，`build` 宏阶段在同一次运行中顺序执行 **会话规整（如 `rewrite.py` 或等价内联写入）→ 导出 → zip**，将树写入 **`$HOME/code-understand-{repo}/sessions/session1/session.jsonl`**（及所需子目录）并打包。
+- **再次修改**：若在导出后仍需改题目或重出包，须 **重跑 `build` 宏阶段整段**（恢复至 `post-compile` 再打完整 `build`），**不支持**在同一 `build` 执行实例内做多轮 rewrite/反复 apply；不自动回滚更早宏阶段，除非用户显式 **rerun** 某前缀阶段。
 
 ---
 
@@ -127,7 +127,7 @@
 ### 7.2 API（概念）
 
 - `GET/POST /api/jobs`、`GET /api/jobs/{id}`、`POST .../stages/{macro}/run`、`POST .../stages/{macro}/rerun`、`POST .../cancel`、`GET .../events`（SSE）。  
-- 宏阶段 `build` 内的 rewrite 子步骤可通过子端点或同一阶段内状态机区分（实现待定）。
+- **题目**：`GET .../rewrite/questions` **即时读取**会话 JSONL；`PUT .../rewrite/questions` **直接写回**会话；**与** **`POST .../stages/build/run`** **分离**：先编辑保存，再用标准阶段 API 跑一次完整 `build`（内置 export + zip）；**不要求**单独的「草稿 tmp」或与 `build/finish` 双轨。**再次改题** → 再一次 `PUT` + **`rerun build`**。
 
 ---
 

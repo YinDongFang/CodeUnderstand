@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 
 from cu.paths import sandbox_home, artifact_root
+from cu.test_mode import test_mode_subprocess_overlay
 
 
 def stage_env(
@@ -34,4 +35,5 @@ def stage_env(
     if claude_project_dir:
         env["CLAUDE_PROJECT_DIR"] = claude_project_dir
 
+    env.update(test_mode_subprocess_overlay())
     return env

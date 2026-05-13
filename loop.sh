@@ -4,8 +4,10 @@
 # =============================================================================
 # 【正式运行 vs 测试（mock）】
 #   正式（默认）：不要设置 LOOP_USE_MOCK_CLAUDE；PATH 中需要真实 claude，以及 jq、python3。
-#   测试：export LOOP_USE_MOCK_CLAUDE=1；不调用真实 claude，改用 testing/mock_claude.sh；仍需要 jq、python3。
-#   切回正式：unset LOOP_USE_MOCK_CLAUDE（或 export LOOP_USE_MOCK_CLAUDE=0）后照常执行即可。
+#   编排器测试：在本进程 export CU_TEST_MODE=1 → cu.stage_env() 会向子进程注入 LOOP_USE_MOCK_CLAUDE=1
+#               （以及 BUILD_*/CLASSIFY_*），无需手设每项。
+#   仅测 loop：export LOOP_USE_MOCK_CLAUDE=1；不调用真实 claude，改用 testing/mock_claude.sh；仍需要 jq、python3。
+#   切回正式：unset LOOP_USE_MOCK_CLAUDE 或设为 0（空值均视为「非 mock」）。
 #   测试常用：export LOOP_PHASE1_TARGET=4 LOOP_TOTAL_TARGET=6 缩短路径；
 #             export LOOP_MOCK_USE_JSONL_RESUME=1 若要在 mock 下仍走 ~/.claude jsonl 恢复逻辑。
 #   会话日志单文件：默认 ${CODE_UNDERSTAND_STATE_ROOT}/loop_logs/run__<REPO>__<RUN>.txt（STATE_ROOT 默认 ~/Documents）；
@@ -173,7 +175,7 @@ REPO_PROMPT_COUNT=0
 
 command -v jq >/dev/null 2>&1 || { loop_err "错误: 未找到 jq"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { loop_err "错误: 未找到 python3"; exit 1; }
-if [[ -z "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+if [[ "${LOOP_USE_MOCK_CLAUDE:-}" != "1" ]]; then
   command -v claude >/dev/null 2>&1 || { loop_err "错误: 未找到 claude（测试请设 LOOP_USE_MOCK_CLAUDE=1）"; exit 1; }
 fi
 
@@ -191,7 +193,7 @@ trap cleanup EXIT
 _claude_invoke_with_cwd() {
   local cwd="$1"
   shift
-  if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+  if [[ "${LOOP_USE_MOCK_CLAUDE:-}" == "1" ]]; then
     bash "${SCRIPT_DIR}/testing/mock_claude.sh" "$@"
     return
   fi
@@ -218,7 +220,7 @@ _loop_infer_side() {
 _loop_log_turn() {
   [[ -z "${LOOP_LOG_FILE:-}" ]] && return 0
   local role="$1" p="$2" r="$3"
-  if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+  if [[ "${LOOP_USE_MOCK_CLAUDE:-}" == "1" ]]; then
     {
       printf '%s\n' "====================="
       printf '%s\n\n' "${role}"
@@ -261,7 +263,7 @@ _loop_log_bind_repo_session() {
   fi
 }
 
-if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" ]]; then
+if [[ "${LOOP_USE_MOCK_CLAUDE:-}" == "1" ]]; then
   loop_out "LOOP_USE_MOCK_CLAUDE=1（会话日志仍写入 LOOP_LOG_FILE）"
   export LOOP_MOCK_SEQ_FILE="${WORK}/.mock_seq"
   printf '0\n' >"${LOOP_MOCK_SEQ_FILE}"
@@ -517,7 +519,7 @@ else
 fi
 
 # Mock 默认忽略 jsonl 恢复，避免本机历史把计数顶满导致阶段一不进循环；需要测恢复路径时设 LOOP_MOCK_USE_JSONL_RESUME=1
-if [[ -n "${LOOP_USE_MOCK_CLAUDE:-}" && -z "${LOOP_MOCK_USE_JSONL_RESUME:-}" ]]; then
+if [[ "${LOOP_USE_MOCK_CLAUDE:-}" == "1" && -z "${LOOP_MOCK_USE_JSONL_RESUME:-}" ]]; then
   SESSION_JSONL=""
   SESSION_REPO=""
   REPO_PROMPT_COUNT=0

@@ -72,15 +72,14 @@ python -m cu run \
 
 | 方式 | 作用 |
 |------|------|
-| **`CU_SKIP_LOOP=1`** | conversation 阶段**不执行**真实 `loop.sh`，在沙箱内写入最小 `{session}.jsonl` 与 `CLAUDE_PROJECT_DIR` 对应的项目目录，仍会继续跑该阶段内的 **`clean.py`** 与 **`build.sh`**（BUILD_DOC_ONLY）。仅供测试接缝，非生产语义。可选用 **`CU_STUB_SESSION_ID`**（固定 UUID 字符串）、**`CU_STUB_PROJECT_SLUG`**（默认 `stub-loop-project`）。实现见 **`cu/stages.py` 顶部模块说明**。 |
+| **`CU_TEST_MODE=1`** | 由 **`cu.env.stage_env()`** 向子进程注入 **`LOOP_USE_MOCK_CLAUDE=1`**、**`BUILD_USE_MOCK_CLAUDE=1`**、**`CLASSIFY_USE_MOCK_CLAUDE=1`**：**仍执行** **`loop.sh`** 与 conversation 内的 **`build.sh`（BUILD_DOC_ONLY）**、`compile` 中的 **`classify.sh`**，但这些脚本对 **Claude CLI** 的调用统一走 **`testing/mock_claude.sh`**。实现与真值表见 **`cu/test_mode.py`**。**不要**将此结果当作生产等价验证。 |
 | **`cu run --start STAGE [--end STAGE]`** | 只跑闭合区间 **`[start, end]`**；`end` 早于 `build` 时成功后作业 **`status` 常为 `pending`**，CLI 按区间内阶段是否全 `success` 决定退出码。 |
 | **`pytest` + patch** | 不被子进程继承；最快回归用 **`tests/test_orchestrator.py`**、**`tests/test_stages.py`**、**`tests/test_api.py`**（FastAPI `TestClient`）。 |
 
 示例（子进程仍会跑后续脚本，但整体比真实多轮 Claude **短得多**）：
 
 ```bash
-export CU_SKIP_LOOP=1
-export CU_STUB_SESSION_ID=deadbeef-dead-beef-dead-beefdeadbeef
+export CU_TEST_MODE=1
 
 cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id u-fast
 ```
@@ -92,14 +91,14 @@ cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip -
 ### 3.1 真实 loop（耗时最长）
 
 ```bash
-unset CU_SKIP_LOOP   # 确保未误入测试接缝
+unset CU_TEST_MODE    # 或 export CU_TEST_MODE=0 —— 确保子进程不因测试模式走 mock
 
 cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id u-001
 ```
 
 预期：
 
-- stdout 实时打印 **`[bootstrap]` … `[build]`** 形如 `step:…` / `stub:…`（若开过 `CU_SKIP_LOOP` 则会出现 `stub:skip-loop`，属预期）。
+- stdout 实时打印 **`[bootstrap]` … `[build]`** 形如 **`step:`** / **`done`** 前缀的阶段事件。
 - 全链跑完后作业 **`success`**。
 - 目录与快照：
 
@@ -116,9 +115,9 @@ cu show u-001
 
 预期：四阶段均 **`success`**，`attempt` 均为 **1**（除非前面重跑过）。
 
-### 3.2 可选：配合 `CU_SKIP_LOOP` 的「伪全链」冒烟
+### 3.2 可选：配合 `CU_TEST_MODE` 的 mock 全链冒烟
 
-若暂不跑真实 Claude 对话，仅用 **§环境与测试接缝** 中的 **`CU_SKIP_LOOP=1`** 再执行与 **§3.1** 相同的 `cu run`，用于验证 **download → conversation（无 loop）→ compile → build** 的编排与落盘。**不要**将此结果当成生产等价验证。
+若在 **§环境与测试接缝** 中已 **`export CU_TEST_MODE=1`**，再执行与 **§3.1** 相同的 `cu run`，用于验证 **`download → conversation（mock loop/doc）→ compile（mock classify）→ build`** 的编排与落盘；**仍会跑**真实 `loop.sh` 外壳逻辑，但不会调用真实 `claude`。**不要**将此结果当成生产等价验证。
 
 ---
 
@@ -165,7 +164,7 @@ curl -s -X POST http://127.0.0.1:8765/api/v1/jobs \
 curl -s -X POST http://127.0.0.1:8765/api/v1/jobs/api-001/stages/bootstrap/run
 ```
 
-**等待四阶段：** 取决于是否真实 `loop.sh`（可另开终端对 **api-001** 调 `cu show`，或拉长 `sleep`。使用 **`CU_SKIP_LOOP`** 时请通过 **同一 systemd/同一 shell export** 让 **`cu serve` 进程继承**，否则会仍跑真实 loop。）
+**等待四阶段：** 取决于会话是否仍在跑真实 Claude（可另开终端对 **api-001** 调 `cu show`，或拉长 `sleep`）。使用 **`CU_TEST_MODE=1`** 时，`cu serve` 进程必须通过 **同一 shell export / systemd `Environment=`** 继承该变量，否则子进程仍会尝试真实 `claude`。）
 
 ```bash
 # 粗略等待后拉详情（时间请按环境调整）
@@ -212,7 +211,7 @@ sqlite3 "$HOME/.code-understand/db.sqlite" "SELECT COUNT(*) FROM stage_runs WHER
 ## 7. 并行
 
 ```bash
-unset CU_SKIP_LOOP   # 或保持 export，两作业均走同一接缝
+unset CU_TEST_MODE    # 或保持 export CU_TEST_MODE=1，使两作业均走 Claude mock（仍跑完整编排）
 
 cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id par-1 &
 cu run https://github.com/sherlock-project/sherlock/archive/refs/heads/main.zip --job-id par-2 &
@@ -226,7 +225,7 @@ cu list
 - 未失败时两条记录终态均可为 **`success`**。
 - 各自的 **`home/`** 与 **`snapshots/`** 与对方隔离。
 
-**说明：** 未设 **`CU_SKIP_LOOP`** 时本节耗时会显著增加；可改用其它小仓库或先开接缝做「编排并行」验证。
+**说明：** 未设 **`CU_TEST_MODE`** 或设为 **`0`** 时本节耗时会显著增加；可改用其它小仓库或在开发机先 **`export CU_TEST_MODE=1`** 做「编排并行」验证。
 
 ---
 
@@ -274,7 +273,7 @@ kill $SERVE_PID
 ## 完成标准
 
 - 按你选择的范围：**§1–§2** 为最低基线；**§3 真实 loop** 与 **§5–§7** 视环境是否具备 **`claude` / 网络** 与可接受时长选做。
-- 使用 **`CU_SKIP_LOOP`** 时，须在记录中注明「非生产等价验证」。
+- 使用 **`CU_TEST_MODE=1`**，或单独设置 **`LOOP_USE_MOCK_CLAUDE` / `BUILD_USE_MOCK_CLAUDE` / `CLASSIFY_USE_MOCK_CLAUDE`** 时，须在记录中注明「非生产等价验证」。
 - 无未预期的 stack trace（**§8** 人为失败除外）。
 - **`cu list`** 时间戳为 ISO8601（UTC）；数据根与仓库目录分离。
 

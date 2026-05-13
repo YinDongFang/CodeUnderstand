@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+import cu.events as eve
 from cu import orchestrator as orch
 from cu.api import create_app
 from cu.models import JOB_STAGES
@@ -26,6 +27,8 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "home" / ".claude").mkdir()
     with orch._ACTIVE_LOCK:
         orch._ACTIVE.clear()
+    with eve._lock:
+        eve._Subscribers.clear()
     return TestClient(create_app())
 
 
@@ -137,3 +140,33 @@ def test_rerun_missing_snapshot_409(client):
     orch._update_stage("api-j-noSnap", "bootstrap", status="success")
     r = client.post("/api/v1/jobs/api-j-noSnap/stages/conversation/rerun")
     assert r.status_code == 409
+
+
+def test_meta(client):
+    r = client.get("/api/v1/meta")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["version"] == "0.3.0"
+    assert isinstance(j["web_ui"], bool)
+
+
+def test_job_dto_has_artifact_zip_field(client):
+    r = client.post("/api/v1/jobs", json={"zip_url": URL, "job_id": "api-j-zipfld"})
+    assert r.status_code == 201
+    assert "artifact_zip_path" in r.json()
+
+
+def test_rewrite_questions_409_until_compile_success(client):
+    client.post("/api/v1/jobs", json={"zip_url": URL, "job_id": "api-j-rwq"})
+    r = client.get("/api/v1/jobs/api-j-rwq/rewrite/questions")
+    assert r.status_code == 409
+
+
+def test_job_events_sse_404_for_unknown_job(client):
+    assert client.get("/api/v1/jobs/ghost-job/events").status_code == 404
+
+
+def test_root_serves_bundle_when_present(client):
+    r = client.get("/")
+    if r.status_code == 200:
+        assert b"CodeUnderstand" in r.content

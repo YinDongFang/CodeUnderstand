@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# 供 loop.sh 在 LOOP_USE_MOCK_CLAUDE=1 时替换真实 claude；只写 stdout/stderr。
-# 题目：MD5(完整 prompt) + 递增序号，带前缀区分场景（ENTRY / L1 / L2 / SUM×2 / FINAL）。
-# 答案：在作为「题目」的 prompt 正文后拼接固定后缀（便于与题目区分）。
+# 供 loop/build/classify 在对应 *USE_MOCK_CLAUDE=1（通常由 CU_TEST_MODE 经 stage_env 注入）时使用。
+# classify：识别与 classify.sh 相同的提示短语，单行输出 {"main_type":...}
+# build/doc：命中 build.sh 生成的 doc 指令则 stdout 静默成功（exit 0），便于由 build.sh 写占位文档
+# loop：题目 MD5(prompt)+序号；repo 应答在正文后拼接固定后缀（便于与题目区分）。
 # 依赖：bash, jq；序号文件由 loop.sh 设置 LOOP_MOCK_SEQ_FILE
 set -eu
 
@@ -11,6 +12,19 @@ command -v jq >/dev/null 2>&1 || {
 }
 
 prompt="${!#}"
+
+# classify.sh：与分类提示模板一致则返回合规 JSON（不经过真实 Claude）
+if [[ "${prompt}" == *"Classify the project into exactly one category"* ]] &&
+  [[ "${prompt}" == *"Return ONLY a single JSON object"* ]]; then
+  jq -nc '{"main_type":"Learning/Tutorial"}'
+  exit 0
+fi
+
+# build.sh doc 生成：不占 loop 序号，直接视为成功调用
+if [[ "${prompt}" == *"IMPORTANT: Write all doc/ output files to this absolute path:"* ]] ||
+  [[ "${prompt}" == *"Generate exactly 4 Markdown documents"* ]]; then
+  exit 0
+fi
 
 json_mode=0
 prev=""
