@@ -166,7 +166,12 @@ def run_compile(ctx: JobContext) -> None:
 
     git_dir = os.path.join(code_dir(ctx.job_id, ctx.repo), ".git")
     if os.path.isdir(git_dir):
-        shutil.rmtree(git_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(git_dir)
+        except OSError as e:
+            raise RuntimeError(
+                f"[compile/cleanup] 删除 .git 失败: {git_dir}: {e}"
+            ) from e
 
 
 def run_build(ctx: JobContext) -> None:
