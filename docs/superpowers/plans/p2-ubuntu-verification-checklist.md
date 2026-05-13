@@ -278,4 +278,4 @@ kill $SERVE_PID
 - 无未预期的 stack trace（**§8** 人为失败除外）。
 - **`cu list`** 时间戳为 ISO8601（UTC）；数据根与仓库目录分离。
 
-完成后可在本仓库开 issue 或在计划文档末尾打勾。
+完成后可在本仓库开 issue、在 spec/plan 末尾打勾，或继续 **P3 Web UI**：见 **`docs/superpowers/plans/2026-05-13-p3-web-ui-sse-rewrite.md`**。
