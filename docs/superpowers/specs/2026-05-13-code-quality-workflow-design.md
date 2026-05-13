@@ -10,7 +10,8 @@
 - 在 **Ubuntu** 上单机部署：从 git 拉取本仓库后 **同一进程** 提供编排服务与 Web UI（浏览器访问本机端口）。
 - **Python** 负责流程编排、状态持久化、API 与 UI；**细粒度稳定操作**（下载、解压、打包、复制等）继续由 **bash** 脚本承担，必要时为编排层增加薄封装脚本。
 - **不兼容 Windows**；开发与生产均以 Linux 为准。
-- 支持 **多作业并行**；每作业 **独立假 `$HOME`（沙箱）**，避免 `~/.claude` 与产物路径冲突。
+- 支持 **多作业并行**；每作业 **独立假 `$HOME`（沙箱）**，避免 `~/.claude` 与产物路径冲突。  
+- **作业与 repo 1:1**：同一时刻 **不会** 存在多个作业指向同一 `repo`（同一 `code-understand-{repo}` 语义）；并行仅发生在 **不同 repo 的不同作业** 之间。沙箱仍保留，用于进程与路径隔离。
 - **dispatch 平台**：当前 **不接真实 API**；仅 **stub** 字段占位，输入仍以 **GitHub archive ZIP URL** 为主（与现有 `run.sh` 输入一致）。
 - **rewrite** 与 **会话导出** 合并为同一宏阶段内的先后步骤；隔离后 **只维护一份会话 JSONL 真源**，导出在 rewrite 通过之后 **一次性** 写入产物树。
 - 支持从某一宏阶段 **重跑**；通过 **快照** 恢复「进入该阶段前」的磁盘状态（见第 6 节）。
@@ -44,8 +45,9 @@
 
 ### 3.2 运行期文件（不得进入上述产物根）
 
-- 日志、`loop_logs`、`tmp`（含 rewrite 用临时题目文件）、`agent-{repo}` 副本、编排器 SQLite 所指的「作业外存」等，一律放在 **假 `$HOME` 下其它固定子路径**（如 `$HOME/Documents/`、`$HOME/logs/`、`$HOME/.cu-work/` 等，实现时统一常量），或 **真实机**上该 `job_id` 专有的快照目录（见 6.2）。  
-- 可通过继续设置 **`CODE_UNDERSTAND_STATE_ROOT=$HOME/Documents`**（或等价路径）与现有脚本习惯对齐，只要保证 **不污染** `code-understand-{repo}/`。
+- 日志、`loop_logs`、`tmp`（含 rewrite 用临时题目文件）、`agent-{repo}` 副本等，**一律直接放在假 `$HOME` 下固定子路径**（如 `$HOME/logs/`、`$HOME/loop_logs/`、`$HOME/tmp/`、`$HOME/agent-{repo}/` 等，实现时统一常量），**不采用**单独抽象 `CODE_UNDERSTAND_STATE_ROOT` 指向真实用户 `~/Documents` 等与真机家目录挂钩的方案。  
+- **持久化**（如编排用 SQLite）放在 **作业根目录** 与 `home/`（假 `$HOME`）**并列**，且不得位于 `code-understand-{repo}/` 内。  
+- **快照归档**（全量 tar 文件）仍建议放在 **假 `$HOME` 之外**（见第 6 节），以免 tar 整树时自包含。
 
 ### 3.3 相对旧流程的路径简化
 
@@ -61,10 +63,12 @@
 
 | 序号 | 宏阶段 ID | 包含的原子能力（概念上） | 说明 |
 |------|-----------|---------------------------|------|
-| 1 | `bootstrap_download` | bootstrap 沙箱 + 从 URL 下载/解压到最终 `code/...` | 产物树开始出现代码 |
-| 2 | `conversation_document` | 等价原 `loop.sh` 多轮对话 + 在最终代码目录上生成 `doc/`（会话仍在沙箱 `.claude`；**此时尚不把** `session.jsonl` 复制到 `sessions/`） | 会话与 doc 就绪 |
-| 3 | `metadata_clean` | 生成 `metadata.json`、占位 `questions.json`、`classify` 等 + **clean** 清理 `.DS_Store`、`__MACOSX` 等不应提交的文件 | 交付树元数据就绪且代码树已清理 |
-| 4 | `rewrite_zip` | **rewrite**（只改一份会话真源）→ **一次性导出**到 `sessions/session1/session.jsonl` → **zip** 整个 `code-understand-{repo}/` | 最终 zip；本阶段结束后 **不打快照** |
+| 1 | `bootstrap` | 沙箱初始化（含从真机复制 `.claude` 配置等）+ 从 URL 下载/解压到最终 `code/...` | 产物树开始出现代码 |
+| 2 | `conversation` | 等价原 `loop.sh` 多轮对话 + 在最终代码目录上生成 `doc/`（会话仍在沙箱 `.claude`；**此时尚不把** `session.jsonl` 复制到 `sessions/`） | 会话与 doc 就绪 |
+| 3 | `compile` | 生成 `metadata.json`、占位 `questions.json`、`classify` 等 + **clean** 清理 `.DS_Store`、`__MACOSX` 等不应提交的文件 | 交付树元数据就绪且代码树已清理 |
+| 4 | `build` | **rewrite**（只改一份会话真源）→ **一次性导出**到 `sessions/session1/session.jsonl` → **zip** 整个 `code-understand-{repo}/` | 最终 zip；**注意**：宏阶段名 `build` 与仓库内现有 `build.sh` 不是同一概念；本阶段结束后 **不打快照** |
+
+**宏阶段 ID 拼写**：对外常量使用英文 **`conversation`**（非 `converstaion`）。
 
 **实现注意**：现有 `run.sh` / `build.sh` / `pack.sh` / `rewrite.py` 需按本规格 **拆分或改参**；不在本文展开具体 diff。
 
@@ -74,7 +78,7 @@
 
 - **隔离后**：rewrite 阶段 **只编辑一份**会话 JSONL（沙箱 `.claude/projects/...` 下与 `SESSION_ID` 对应文件）。  
 - **导出**：rewrite 审核通过后，**再** 导出到 **`$HOME/code-understand-{repo}/sessions/session1/session.jsonl`**（及所需子目录）。  
-- **多轮修改**：仍在宏阶段 `rewrite_zip` 内循环；不自动回滚更早宏阶段。
+- **多轮修改**：仍在宏阶段 `build` 内循环；不自动回滚更早宏阶段。
 
 ---
 
@@ -84,19 +88,20 @@
 
 - 采用 **全量 tar 假 `$HOME` 整树**（用户接受耗时；用合并阶段减少次数）。  
 - **必须**排除：快照输出目录自身、`.tar` 临时文件、以及任何「快照写入路径若被包含会导致自包含膨胀」的路径。推荐 **快照文件存放在假 `$HOME` 之外**（例如 `/var/lib/<app>/jobs/<job_id>/snapshots/`），逻辑最简单。  
-- **仅在宏阶段 1、2、3 成功结束后** 各保存一份快照：`post-1`、`post-2`、`post-3`。  
-- **宏阶段 4 成功后不保存快照**（已是最终可交付状态）。
+- **仅在宏阶段 `bootstrap`、`conversation`、`compile` 成功结束后** 各保存一份快照，建议命名为：`post-bootstrap`、`post-conversation`、`post-compile`。  
+- **宏阶段 `build` 成功后不保存快照**（已是最终可交付状态）。
 
 ### 6.2 重跑语义
 
-- **从宏阶段 N 重跑**（N ∈ {1,2,3,4}）：  
-  - 若 **N > 1**：先将假 `$HOME`（或规格中定义的「可恢复工作区」）**恢复**为快照 **`post-(N−1)`** 的内容，再执行 N。  
-  - 若 **N = 1**：无 `post-0` 时，采用 **显式空壳重置**：删除本作业下与「下载代码、会话、产物树」相关的目录后重新执行 `bootstrap_download`（与「新建作业后尚未执行任何宏阶段」等价的磁盘状态）；具体删除路径在实现清单中列死。  
-- 重跑 N 时，将 **宏阶段 N…4** 的状态重置为待运行（或等价 `pending`），与先前第二节「从某阶段起作废后续」一致。
+- **从某一宏阶段重跑**（阶段序：`bootstrap` → `conversation` → `compile` → `build`）：  
+  - 若重跑阶段 **不是** `bootstrap`：先将假 `$HOME`（或规格中定义的「可恢复工作区」）**恢复**为上一宏阶段成功时的快照（例如重跑 `conversation` 前恢复 `post-bootstrap`）。  
+  - 若重跑 **`bootstrap`**：无前置快照时，采用 **显式空壳重置**：删除本作业下与「下载代码、会话、产物树」相关的目录后重新执行 `bootstrap`（与「新建作业后尚未执行任何宏阶段」等价的磁盘状态）；具体删除路径在实现清单中列死。  
+- 重跑某一宏阶段时，将 **该阶段及之后各宏阶段** 的状态重置为待运行（或等价 `pending`），与「从某阶段起作废后续」一致。
 
-### 6.3 定期清理
+### 6.3 清理策略
 
-- **已完成**的作业可按策略（保留天数、保留条数）**删除快照与沙箱目录**以控磁盘；与 **删除作业**（第 8 节）共用底层清理逻辑。
+- **不做**基于时间或条数的 **定期自动清理**已完成作业，避免误删；磁盘由运维或用户 **手动删除作业**（第 8 节）管理。  
+- **UI**：对作业与阶段展示 **时间信息**（创建时间、各阶段开始/结束时间、持续时长等），便于用户感知占用与陈旧程度。
 
 ---
 
@@ -104,12 +109,13 @@
 
 ### 7.1 UI
 
-- 作业列表、作业详情（**4 宏阶段**流水线视图）、日志视图（SSE 或轮询）、新建作业（ZIP URL + dispatch stub 占位字段）、产物路径与 zip 下载链接。
+- 作业列表、作业详情（**4 宏阶段**：`bootstrap` / `conversation` / `compile` / `build`）、日志视图（SSE 或轮询）、新建作业（ZIP URL + dispatch stub 占位字段）、产物路径与 zip 下载链接。  
+- **时间展示**：列表与详情中明确展示作业与各阶段的 **时间戳与耗时**（见第 6.3 节）；不提供自动定期删除。
 
 ### 7.2 API（概念）
 
 - `GET/POST /api/jobs`、`GET /api/jobs/{id}`、`POST .../stages/{macro}/run`、`POST .../stages/{macro}/rerun`、`POST .../cancel`、`GET .../events`（SSE）。  
-- `rewrite` 子操作可通过 `rewrite_zip` 下的子端点或同一阶段内状态机区分（实现待定）。
+- 宏阶段 `build` 内的 rewrite 子步骤可通过子端点或同一阶段内状态机区分（实现待定）。
 
 ---
 
@@ -123,7 +129,7 @@
 
 ## 9. 风险与后续优化
 
-- **全量 tar 体积**：已通过 **合并宏阶段**、**末阶段不打快照**、**定期清理已完成 job** 缓解；仍应监控磁盘。  
+- **全量 tar 体积**：已通过 **合并宏阶段**、**末阶段不打快照** 缓解；无自动清理时磁盘持续增长，依赖用户 **手动删除作业** 与运维监控。  
 - **后续可选**：将全量 tar 改为 `rsync --link-dest` 增量、或缩小 tar 包含子树（需防遗漏清单）。  
 - **manifest**：实现阶段维护「每宏阶段结束纳入 tar 的路径列表」自检，避免 `tar` 源路径配置错误导致空包。
 
@@ -131,7 +137,7 @@
 
 ## 10. 验收要点（摘要）
 
-- 两作业并行、同 GitHub `repo` 名：互不覆盖 `.claude` 与产物路径。  
+- 两作业并行、**不同 repo**：沙箱下互不覆盖 `.claude` 与产物路径；业务规则保证 **作业与 repo 1:1**，不出现多作业同 repo。  
 - 从宏阶段 2、3、4 重跑：恢复后再次执行结果与首次一致（在相同输入与相同人工 rewrite 输入下）。  
 - `code-understand-{repo}/` 内无运行期垃圾文件；zip 仅含交付物。  
 - 删除 job 后磁盘上无残留沙箱与快照（在实现定义的根目录范围内）。
