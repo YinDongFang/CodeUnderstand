@@ -46,14 +46,26 @@
 ### 3.2 运行期文件（不得进入上述产物根）
 
 - 日志、`loop_logs`、`tmp`（含 rewrite 用临时题目文件）、`agent-{repo}` 副本等，**一律直接放在假 `$HOME` 下固定子路径**（如 `$HOME/logs/`、`$HOME/loop_logs/`、`$HOME/tmp/`、`$HOME/agent-{repo}/` 等，实现时统一常量），**不采用**单独抽象 `CODE_UNDERSTAND_STATE_ROOT` 指向真实用户 `~/Documents` 等与真机家目录挂钩的方案。  
-- **持久化**（如编排用 SQLite）放在 **作业根目录** 与 `home/`（假 `$HOME`）**并列**，且不得位于 `code-understand-{repo}/` 内。  
-- **快照归档**（全量 tar 文件）仍建议放在 **假 `$HOME` 之外**（见第 6 节），以免 tar 整树时自包含。
+- **作业根目录** 本身位于 **平台运行时数据根**（见 §3.4）下，与本仓库 git 工作树相互独立。  
+- **快照归档**（全量 tar 文件）放在 **假 `$HOME` 之外**（作业根目录下 `snapshots/`，见 §3.4 与第 6 节），避免 tar 整树时自包含。
 
 ### 3.3 相对旧流程的路径简化
 
 - **不再使用** 全局的 `$HOME/projects/{repo}` 与 `$HOME/outputs/code-understand-{repo}/` 双轨。  
 - **代码**自下载起即落在 **`$HOME/code-understand-{repo}/code/{repo}/`**（或等价一跳整理）。  
 - 因 **假 `$HOME` 已按作业隔离**，不再使用单独的 `outputs/` 层；**「最终 output」即 `code-understand-{repo}/` 根**。
+
+### 3.4 平台运行时数据根（**不得位于仓库目录下**）
+
+- 平台自身的运行时数据（作业沙箱、快照归档、编排 SQLite、应用日志等）**禁止**放在本仓库 git 工作树之内，避免污染源码与 `git pull` 冲突。  
+- 统一根路径为 **`$REAL_HOME/.code-understand/`**（即真实用户家目录下的隐藏目录；可由环境变量 `CU_DATA_ROOT` 覆盖以便测试或定制）。  
+- 推荐布局（实现时为统一常量）：  
+  - `$REAL_HOME/.code-understand/jobs/<job_id>/home/` — 该作业的 **假 `$HOME`**（沙箱根）。  
+  - `$REAL_HOME/.code-understand/jobs/<job_id>/snapshots/` — 该作业的全量 tar 快照归档。  
+  - `$REAL_HOME/.code-understand/jobs/<job_id>/job.log` — 编排器视角的作业级日志（与沙箱内日志区分）。  
+  - `$REAL_HOME/.code-understand/db.sqlite` — 编排器持久化数据库。  
+  - `$REAL_HOME/.code-understand/app.log` — 平台自身（非作业特定）日志。  
+- 仓库内 **只允许**存放：源码、设计/计划文档、单元测试 fixture。**不**写入任何作业运行结果或快照。
 
 ---
 
