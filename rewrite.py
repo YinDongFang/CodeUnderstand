@@ -271,9 +271,12 @@ def main() -> int:
 
     tmp_dir = os.path.join(_state_root(), "tmp")
     tmp_path = os.path.join(tmp_dir, f"{repo}_questions.txt")
-    dump_questions_to_tmp(tmp_path, questions)
-    print(f"已写入: {tmp_path}（共 {len(questions)} 条）")
-    print("说明: 每行一条 JSON 字符串，顺序与会话中一致；仅改字符串内文字，勿增删行数。")
+    if not args.non_interactive:
+        dump_questions_to_tmp(tmp_path, questions)
+        print(f"已写入: {tmp_path}（共 {len(questions)} 条）")
+        print("说明: 每行一条 JSON 字符串，顺序与会话中一致；仅改字符串内文字，勿增删行数。")
+    else:
+        print(f"非交互模式：从已存在的 tmp 文件读取编辑结果: {tmp_path}")
 
     new_list: list[str] = []
     if args.non_interactive:

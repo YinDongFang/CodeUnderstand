@@ -55,3 +55,49 @@ def test_non_interactive_missing_tmp_returns_error(tmp_path, monkeypatch):
     # 测试断言：流程能正常运行到非交互分支并以 returncode in {0,1} 结束（不抛异常、不开 gedit）。
     assert proc.returncode in (0, 1), f"stderr: {proc.stderr}"
     assert "gedit" not in proc.stderr.lower()
+
+
+def test_non_interactive_writes_back_single_source(tmp_path, monkeypatch):
+    """--single-source --non-interactive 应将 tmp 文件中改动的问题写回 source jsonl。"""
+    import json
+    repo = "demo"
+    session_id = "11111111-1111-1111-1111-111111111111"
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("CODE_UNDERSTAND_STATE_ROOT", str(fake_home))
+    monkeypatch.setenv("OUTPUTS_DIR", str(fake_home))
+    monkeypatch.setenv("SESSION_ID", session_id)
+
+    proj = fake_home / ".claude" / "projects" / "encoded-dir-name"
+    proj.mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+
+    original_q = "What does this module do exactly?"
+    src = proj / f"{session_id}.jsonl"
+    src.write_text(
+        json.dumps({"type": "user", "message": {"content": original_q}}) + "\n",
+        encoding="utf-8",
+    )
+
+    tmp_dir = fake_home / "tmp"
+    tmp_dir.mkdir()
+    tmp_file = tmp_dir / f"{repo}_questions.txt"
+    new_q = "Explain the module responsibilities and entry points."
+    tmp_file.write_text(json.dumps(new_q, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    proc = subprocess.run(
+        [sys.executable, os.path.join(repo_root, "rewrite.py"),
+         repo, "--single-source", "--non-interactive"],
+        capture_output=True, text=True, timeout=30,
+        env={**os.environ},
+    )
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
+    )
+
+    final = src.read_text(encoding="utf-8")
+    assert new_q in final, f"new question not written back; file:\n{final}"
+    assert original_q not in final, f"original question still present; file:\n{final}"
