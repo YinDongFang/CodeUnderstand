@@ -2,11 +2,18 @@
 
 阶段序：bootstrap → conversation → compile → build
 每个阶段函数接收 JobContext，调用 bash/python 子进程并返回成功；失败抛 RuntimeError。
+
+测试接缝（勿在生产依赖语义）：
+- ``CU_SKIP_LOOP``: 若为 ``1``/``true``/``yes``（大小写不敏感），跳过真实 ``loop.sh``，
+  在沙箱内写入最小 ``.jsonl`` 并设置 ``session_id`` / ``claude_project_dir``，
+  仍执行 ``clean.py`` 与 ``BUILD_DOC_ONLY`` 的 ``build.sh``。
+  可选 ``CU_STUB_SESSION_ID``（否则随机 UUID）；可选 ``CU_STUB_PROJECT_SLUG``（默认 ``stub-loop-project``）。
 """
 from __future__ import annotations
 
 import os
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -42,6 +49,24 @@ class JobContext:
 def _repo_root() -> str:
     """本仓库的根目录（cu/ 的父目录）。"""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _env_truthy(key: str) -> bool:
+    return os.environ.get(key, "").strip().lower() in ("1", "true", "yes")
+
+
+def _apply_skip_loop_stub(ctx: JobContext) -> None:
+    """在跳过 loop.sh 时补足 session 与 Claude 项目目录（供后续 clean/build 使用）。"""
+    sid_raw = os.environ.get("CU_STUB_SESSION_ID", "").strip()
+    ctx.session_id = sid_raw or str(uuid.uuid4())
+    slug = os.environ.get("CU_STUB_PROJECT_SLUG", "").strip() or "stub-loop-project"
+    sandbox = sandbox_home(ctx.job_id)
+    proj = os.path.join(sandbox, ".claude", "projects", slug)
+    os.makedirs(proj, exist_ok=True)
+    jsonl = os.path.join(proj, f"{ctx.session_id}.jsonl")
+    with open(jsonl, "w", encoding="utf-8") as f:
+        f.write("{}\n")
+    ctx.claude_project_dir = proj
 
 
 def _find_claude_project_dir(sandbox_home_path: str, session_id: str) -> str:
@@ -105,29 +130,33 @@ def run_conversation(ctx: JobContext) -> None:
     )
 
     ctx.fire("conversation", "step:loop")
-    result = run_script(
-        os.path.join(repo_root, "loop.sh"),
-        args=[target_path, ctx.repo],
-        env=env,
-        cwd=repo_root,
-        pid_sink=ctx.pid_sink,
-    )
-    _check(result, "conversation", "loop")
-
-    if not ctx.session_id:
-        lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
-        if not lines:
-            raise RuntimeError("[conversation/loop] 未从 stdout 解析到 session_id")
-        ctx.session_id = lines[-1]
-
-    sandbox = sandbox_home(ctx.job_id)
-    found = _find_claude_project_dir(sandbox, ctx.session_id)
-    if not found:
-        raise RuntimeError(
-            f"[conversation/loop] 未在 {sandbox}/.claude/projects/ 下找到 "
-            f"包含 {ctx.session_id}.jsonl 的目录"
+    if _env_truthy("CU_SKIP_LOOP"):
+        ctx.fire("conversation", "stub:skip-loop")
+        _apply_skip_loop_stub(ctx)
+    else:
+        result = run_script(
+            os.path.join(repo_root, "loop.sh"),
+            args=[target_path, ctx.repo],
+            env=env,
+            cwd=repo_root,
+            pid_sink=ctx.pid_sink,
         )
-    ctx.claude_project_dir = found
+        _check(result, "conversation", "loop")
+
+        if not ctx.session_id:
+            lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+            if not lines:
+                raise RuntimeError("[conversation/loop] 未从 stdout 解析到 session_id")
+            ctx.session_id = lines[-1]
+
+        sandbox = sandbox_home(ctx.job_id)
+        found = _find_claude_project_dir(sandbox, ctx.session_id)
+        if not found:
+            raise RuntimeError(
+                f"[conversation/loop] 未在 {sandbox}/.claude/projects/ 下找到 "
+                f"包含 {ctx.session_id}.jsonl 的目录"
+            )
+        ctx.claude_project_dir = found
 
     env = stage_env(
         job_id=ctx.job_id, repo=ctx.repo,

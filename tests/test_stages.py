@@ -77,6 +77,52 @@ def test_bootstrap_propagates_failure(isolated_env):
         assert "download" in str(exc.value)
 
 
+def test_run_conversation_skips_loop_when_cu_skip_loop(isolated_env, monkeypatch):
+    """CU_SKIP_LOOP=1 时不应调用 loop.sh，仍调用 clean/build（此处继续 mock）。"""
+    monkeypatch.setenv("CU_SKIP_LOOP", "1")
+    monkeypatch.setenv("CU_STUB_SESSION_ID", "deadbeef-0000-0000-0000-000000000000")
+
+    from cu import stages as st
+    from cu.sandbox import bootstrap_sandbox
+    from cu.paths import code_dir
+
+    jid = "conv-skip"
+    repo = "demo-repo"
+    bootstrap_sandbox(jid)
+    os.makedirs(code_dir(jid, repo), exist_ok=True)
+
+    scripts: list[str] = []
+
+    def fake_run_script(script, args=None, **kwargs):
+        scripts.append(script)
+        if script.endswith("loop.sh"):
+            raise AssertionError("loop.sh must not be invoked when CU_SKIP_LOOP=1")
+        return RunResult(0, "", "")
+
+    def fake_run_python(script, args=None, **kwargs):
+        scripts.append(script)
+        return RunResult(0, "", "")
+
+    monkeypatch.setattr(st, "run_script", fake_run_script)
+    monkeypatch.setattr(st, "run_python", fake_run_python)
+
+    ctx = JobContext(
+        job_id=jid,
+        repo=repo,
+        zip_url=f"https://github.com/u/{repo}/archive/refs/heads/main.zip",
+        github_url=f"https://github.com/u/{repo}",
+    )
+    st.run_conversation(ctx)
+
+    assert ctx.session_id == "deadbeef-0000-0000-0000-000000000000"
+    assert "stub-loop-project" in ctx.claude_project_dir.replace("\\", "/")
+
+    bases = [os.path.basename(p) for p in scripts]
+    assert "loop.sh" not in bases
+    assert "build.sh" in bases
+    assert any(os.path.basename(p) == "clean.py" for p in scripts)
+
+
 def test_full_pipeline_mock(isolated_env, monkeypatch):
     """mock 全链：4 阶段顺序调用，conversation 后注入 CLAUDE_PROJECT_DIR。"""
     from cu import stages as st
