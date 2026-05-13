@@ -51,3 +51,21 @@ def test_run_script_failure(tmp_path):
         timeout=10,
     )
     assert result.returncode == 42
+
+
+def test_run_script_pid_sink_invoked(tmp_path):
+    script = tmp_path / "ok.sh"
+    script.write_bytes(b"#!/bin/bash\necho hi\n")
+    script.chmod(0o755)
+    captured: list[int] = []
+    result = run_script(
+        _bash_path(str(script)),
+        env=None,
+        cwd=str(tmp_path),
+        timeout=10,
+        pid_sink=lambda pid: captured.append(pid),
+    )
+    assert result.returncode == 0
+    assert "hi" in result.stdout
+    assert len(captured) == 1
+    assert isinstance(captured[0], int) and captured[0] > 0
