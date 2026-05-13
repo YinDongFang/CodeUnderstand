@@ -55,3 +55,61 @@ def test_bootstrap_propagates_failure(isolated_env):
             run_bootstrap(ctx)
         assert "bootstrap" in str(exc.value)
         assert "download" in str(exc.value)
+
+
+def test_full_pipeline_mock(isolated_env, monkeypatch):
+    """mock 全链：4 阶段顺序调用，conversation 后注入 CLAUDE_PROJECT_DIR。"""
+    from cu import stages as st
+    from cu.paths import sandbox_home
+
+    job_id = "pipe-001"
+    repo = "demo-repo"
+    session_id = "deadbeef-0000-0000-0000-000000000000"
+
+    calls = []
+
+    def fake_run_script(script, args=None, *, env=None, cwd=None, timeout=None, stream=False):
+        calls.append(("script", script, list(args or []), dict(env or {})))
+        from cu.runner import RunResult
+        if script.endswith("loop.sh"):
+            sandbox = sandbox_home(job_id)
+            proj = os.path.join(sandbox, ".claude", "projects", "encoded-cwd-x")
+            os.makedirs(proj, exist_ok=True)
+            with open(os.path.join(proj, f"{session_id}.jsonl"), "w") as f:
+                f.write("{}\n")
+            return RunResult(0, f"info\n{session_id}\n", "")
+        return RunResult(0, "ok\n", "")
+
+    def fake_run_python(script, args=None, *, env=None, cwd=None, timeout=None, stream=False):
+        calls.append(("python", script, list(args or []), dict(env or {})))
+        from cu.runner import RunResult
+        return RunResult(0, "", "")
+
+    monkeypatch.setattr(st, "run_script", fake_run_script)
+    monkeypatch.setattr(st, "run_python", fake_run_python)
+
+    ctx = st.JobContext(
+        job_id=job_id, repo=repo,
+        zip_url=f"https://github.com/u/{repo}/archive/refs/heads/main.zip",
+        github_url=f"https://github.com/u/{repo}",
+    )
+    for name in st.STAGES:
+        st.STAGE_RUNNERS[name](ctx)
+
+    assert len(calls) == 8, f"expected 8 calls, got {len(calls)}: {[c[1] for c in calls]}"
+
+    script_seq = [os.path.basename(c[1]) for c in calls]
+    assert script_seq == [
+        "download.sh",
+        "loop.sh", "clean.py", "build.sh",
+        "metadata.sh", "clean_artifacts.sh",
+        "export_session.sh", "zip.sh",
+    ], f"unexpected sequence: {script_seq}"
+
+    build_call = calls[3]
+    assert build_call[3].get("BUILD_DOC_ONLY") == "1"
+    assert build_call[3].get("CLAUDE_PROJECT_DIR", "").endswith("encoded-cwd-x")
+
+    export_call = calls[6]
+    assert export_call[3].get("CLAUDE_PROJECT_DIR", "").endswith("encoded-cwd-x")
+    assert export_call[3].get("ARTIFACT_ROOT", "").endswith(f"code-understand-{repo}")
