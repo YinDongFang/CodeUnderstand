@@ -9,3 +9,4 @@ cu = "cu.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["slow: requires real environment (claude, network, wget, jq, etc.)"]
