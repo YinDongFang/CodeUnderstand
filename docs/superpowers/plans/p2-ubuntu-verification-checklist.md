@@ -1,7 +1,9 @@
 # P2 · Ubuntu 真机验证清单
 
 > 在 Ubuntu 上从 git 拉取最新 `mindflow` 后逐项执行。
-> 所有命令默认在仓库根目录运行。生产环境路径 `~/.code-understand/` 不能位于仓库内。
+> 所有命令默认在仓库根目录运行。生产默认数据根为 **`$HOME/.code-understand`**；可用环境变量 **`CU_DATA_ROOT`** 覆盖（须与仓库目录分离）。
+>
+> API 字段与 CLI 子命令综述见：**`docs/superpowers/specs/p2-api-reference.md`**。
 
 ---
 
@@ -11,11 +13,16 @@
 cd ~ && git clone <repo> CodeUnderstand && cd CodeUnderstand
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"
-# 验证外部依赖
-which claude jq wget unzip zip curl gedit
+# 可选：确认 cu 指向本仓库 venv
+which cu && cu --help | head -5
+
+# 验证外部依赖（按你实际流水线需要）
+which claude jq wget unzip zip curl git bash python3
+# gedit 仅 rewrite 交互用；rewrite 未纳入 P2 编排时可缺省
+which gedit 2>/dev/null || true
 ```
 
-预期：以上命令都有结果；如 `gedit` 缺失，rewrite 交互暂不影响 P2 验证（rewrite 已延后到 P3）。
+预期：`pip install -e ".[test]"` 成功后本地出现可编辑安装的元数据目录（形如 `*.egg-info/`，已由 `.gitignore` 忽略）；`cu` 子命令列表含 `run,list,show,rerun,cancel,delete,serve`。
 
 ---
 
@@ -25,7 +32,7 @@ which claude jq wget unzip zip curl gedit
 python -m pytest tests/ -v -m "not slow"
 ```
 
-预期：**64 passed, 1 deselected**（与 Windows 开发机基线一致；如有新增以测试输出为准）。
+预期：**pytest 收集约 67 passed, 1 deselected**（以你本机输出为准；随版本会略增）。
 
 ---
 
@@ -35,56 +42,100 @@ python -m pytest tests/ -v -m "not slow"
 python -m pytest tests/test_e2e_smoke.py -v -m slow
 ```
 
-预期：1 passed；磁盘上出现：
+**说明：** 测试里通过 `monkeypatch` 将 **`CU_DATA_ROOT`** 指到 pytest 临时目录（例如 `/tmp/pytest-*/…/cu`），**不是**默认的 `~/.code-understand`。因此断言的是「脚本退出码与临时目录下的目录树」，而非主目录路径。
 
+预期：**1 passed**；临时根下存在（`$CU_DATA_ROOT` 由测试注入，通常为 `tmp_path/cu`）：
+
+```text
+jobs/smoke-test/home/code-understand-nocode/code/nocode/README.md
 ```
-~/.code-understand/jobs/smoke-test/home/code-understand-nocode/code/nocode/README.md
-~/.code-understand/jobs/smoke-test/home/code-understand-nocode/code/nocode/.git/
+
+（及以下载产生的 `.git/` 等，与 `download.sh` 行为一致。）
+
+CLI 等价命令（可自行在 shell 验证，数据将落在 **`CU_DATA_ROOT` / 默认 `~/.code-understand`**）：
+
+```bash
+export CU_DATA_ROOT="${CU_DATA_ROOT:-$HOME/.code-understand/manual-smoke}"
+python -m cu run \
+  https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip \
+  --start bootstrap --end bootstrap \
+  --job-id smoke-test
+```
+
+预期：**退出码 0**（区间内阶段均成功时，作业行可能仍为 `pending`，属正常现象，见 **`p2-api-reference.md`** 中「部分阶段跑完」语义）。
+
+---
+
+## 环境与测试接缝（可选，缩短耗时）
+
+以下内容不影响「完成标准」，但适合你**不想调用真实 long-running `loop.sh`** 时做快速自检。
+
+| 方式 | 作用 |
+|------|------|
+| **`CU_SKIP_LOOP=1`** | conversation 阶段**不执行**真实 `loop.sh`，在沙箱内写入最小 `{session}.jsonl` 与 `CLAUDE_PROJECT_DIR` 对应的项目目录，仍会继续跑该阶段内的 **`clean.py`** 与 **`build.sh`**（BUILD_DOC_ONLY）。仅供测试接缝，非生产语义。可选用 **`CU_STUB_SESSION_ID`**（固定 UUID 字符串）、**`CU_STUB_PROJECT_SLUG`**（默认 `stub-loop-project`）。实现见 **`cu/stages.py` 顶部模块说明**。 |
+| **`cu run --start STAGE [--end STAGE]`** | 只跑闭合区间 **`[start, end]`**；`end` 早于 `build` 时成功后作业 **`status` 常为 `pending`**，CLI 按区间内阶段是否全 `success` 决定退出码。 |
+| **`pytest` + patch** | 不被子进程继承；最快回归用 **`tests/test_orchestrator.py`**、**`tests/test_stages.py`**、**`tests/test_api.py`**（FastAPI `TestClient`）。 |
+
+示例（子进程仍会跑后续脚本，但整体比真实多轮 Claude **短得多**）：
+
+```bash
+export CU_SKIP_LOOP=1
+export CU_STUB_SESSION_ID=deadbeef-dead-beef-dead-beefdeadbeef
+
+cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id u-fast
 ```
 
 ---
 
-## 3. P2 CLI 端到端（4 阶段全跑）
+## 3. P2 CLI 端到端（四阶段全跑）
+
+### 3.1 真实 loop（耗时最长）
 
 ```bash
+unset CU_SKIP_LOOP   # 确保未误入测试接缝
+
 cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id u-001
 ```
 
 预期：
-- stdout 实时打印 `[bootstrap]/[conversation]/[compile]/[build]` 进度。
-- 终态 `success`。
-- 沙箱产出：
+
+- stdout 实时打印 **`[bootstrap]` … `[build]`** 形如 `step:…` / `stub:…`（若开过 `CU_SKIP_LOOP` 则会出现 `stub:skip-loop`，属预期）。
+- 全链跑完后作业 **`success`**。
+- 目录与快照：
 
 ```bash
-ls ~/.code-understand/jobs/u-001/
-# home/  snapshots/
-ls ~/.code-understand/jobs/u-001/snapshots/
+ls "$HOME/.code-understand/jobs/u-001/"    # home/  snapshots/（若改过 CU_DATA_ROOT 则替换路径）
+ls "$HOME/.code-understand/jobs/u-001/snapshots/"
 # post-bootstrap.tar  post-conversation.tar  post-compile.tar
-ls ~/.code-understand/jobs/u-001/home/
-# code-understand-nocode/  code-understand-nocode.zip  .claude/  logs/  loop_logs/  tmp/
+ls "$HOME/.code-understand/jobs/u-001/home/"
 ```
 
 ```bash
 cu show u-001
 ```
 
-预期：4 阶段均 `success`，attempt 都为 1。
+预期：四阶段均 **`success`**，`attempt` 均为 **1**（除非前面重跑过）。
+
+### 3.2 可选：配合 `CU_SKIP_LOOP` 的「伪全链」冒烟
+
+若暂不跑真实 Claude 对话，仅用 **§环境与测试接缝** 中的 **`CU_SKIP_LOOP=1`** 再执行与 **§3.1** 相同的 `cu run`，用于验证 **download → conversation（无 loop）→ compile → build** 的编排与落盘。**不要**将此结果当成生产等价验证。
 
 ---
 
 ## 4. P2 重跑（恢复快照）
 
 ```bash
-# 故意污染 home/，再 rerun compile
-echo "junk" > ~/.code-understand/jobs/u-001/home/JUNK.txt
+# 故意污染 home/，再 rerun compile（路径按你的 CU_DATA_ROOT 调整）
+echo "junk" > "$HOME/.code-understand/jobs/u-001/home/JUNK.txt"
 cu rerun u-001 compile
 cu show u-001
 ```
 
 预期：
-- `JUNK.txt` 不再存在（被 `post-conversation.tar` 覆盖恢复）。
+
+- `JUNK.txt` 不再存在（被 **`post-conversation`** 快照恢复覆盖）。
 - `compile.attempt == 2`，`build.attempt == 2`。
-- `bootstrap.attempt == 1`，`conversation.attempt == 1`（未被波及）。
+- `bootstrap.attempt == 1`，`conversation.attempt == 1`（未被重跑条目递增规则影响时保持 1）。
 
 ---
 
@@ -98,7 +149,7 @@ SERVE_PID=$!
 sleep 2
 ```
 
-5.1 列表（应至少含 u-001）：
+5.1 列表（应至少含 `u-001`，若本节前曾删库则可能没有）：
 
 ```bash
 curl -s http://127.0.0.1:8765/api/v1/jobs | jq '.[].job_id'
@@ -112,14 +163,20 @@ curl -s -X POST http://127.0.0.1:8765/api/v1/jobs \
   -d '{"zip_url":"https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip","job_id":"api-001"}' | jq
 
 curl -s -X POST http://127.0.0.1:8765/api/v1/jobs/api-001/stages/bootstrap/run
-# 等待 4 阶段完成（nocode 仓库 ~3-5 分钟）
+```
+
+**等待四阶段：** 取决于是否真实 `loop.sh`（可另开终端对 **api-001** 调 `cu show`，或拉长 `sleep`。使用 **`CU_SKIP_LOOP`** 时请通过 **同一 systemd/同一 shell export** 让 **`cu serve` 进程继承**，否则会仍跑真实 loop。）
+
+```bash
+# 粗略等待后拉详情（时间请按环境调整）
 sleep 300
 curl -s http://127.0.0.1:8765/api/v1/jobs/api-001 | jq '.status, [.stages[] | {stage, status}]'
 ```
 
 预期：
-- `status: "success"`
-- 4 个 stage 都是 `success`
+
+- **`status: "success"`**
+- 四个 **`stage`** 均为 **`success`**
 
 5.3 重跑 API：
 
@@ -129,9 +186,9 @@ sleep 60
 curl -s http://127.0.0.1:8765/api/v1/jobs/api-001 | jq '.stages[] | select(.stage=="build") | {status, attempt}'
 ```
 
-预期：`build` 再次 `success`，`attempt == 2`。
+预期：`build` 再次 **`success`**，`attempt == 2`。
 
-5.4 取消（构造一个会自然完成的快作业不便演示；可在 conversation 长跑时另开终端 `cu cancel <job>` 验证）。
+5.4 **取消**：在长跑阶段另开终端执行 **`cu cancel <job_id>`**；或后续 P3 前再补自动化。
 
 收尾：
 
@@ -145,9 +202,9 @@ kill $SERVE_PID
 
 ```bash
 cu delete api-001
-ls ~/.code-understand/jobs/  # 应不再含 api-001
-sqlite3 ~/.code-understand/db.sqlite "SELECT job_id FROM jobs;"   # 应只剩 u-001
-sqlite3 ~/.code-understand/db.sqlite "SELECT COUNT(*) FROM stage_runs WHERE job_id='api-001';"   # 应为 0
+ls "$HOME/.code-understand/jobs/"   # 应不再含 api-001（路径随 CU_DATA_ROOT）
+sqlite3 "$HOME/.code-understand/db.sqlite" "SELECT job_id FROM jobs;"
+sqlite3 "$HOME/.code-understand/db.sqlite" "SELECT COUNT(*) FROM stage_runs WHERE job_id='api-001';"   # 应为 0
 ```
 
 ---
@@ -155,23 +212,27 @@ sqlite3 ~/.code-understand/db.sqlite "SELECT COUNT(*) FROM stage_runs WHERE job_
 ## 7. 并行
 
 ```bash
+unset CU_SKIP_LOOP   # 或保持 export，两作业均走同一接缝
+
 cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id par-1 &
-cu run https://github.com/sherlock-project/sherlock/archive/refs/heads/master.zip --job-id par-2 &
+cu run https://github.com/sherlock-project/sherlock/archive/refs/heads/main.zip --job-id par-2 &
 wait
 cu list
 ```
 
 预期：
+
 - 两个作业互不干扰，各自独立沙箱、独立 DB 行。
-- 两条记录终态都是 `success`。
-- 各自的 `home/` 与 `snapshots/` 与对方完全隔离。
+- 未失败时两条记录终态均可为 **`success`**。
+- 各自的 **`home/`** 与 **`snapshots/`** 与对方隔离。
+
+**说明：** 未设 **`CU_SKIP_LOOP`** 时本节耗时会显著增加；可改用其它小仓库或先开接缝做「编排并行」验证。
 
 ---
 
 ## 8. 失败回归（人为破坏验证错误处理）
 
 ```bash
-# 删除 download.sh 触发 bootstrap 失败
 git stash push -- download.sh
 cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id fail-001
 cu show fail-001
@@ -179,8 +240,9 @@ git stash pop
 ```
 
 预期：
-- 终态 `failed`，`bootstrap` 阶段 `failed`，`conversation/compile/build` 仍 `pending`。
-- `log_tail` 含 `bootstrap`/`download`。
+
+- 终态 **`failed`**，**`bootstrap`** 阶段 **`failed`**，**`conversation` / `compile` / `build`** 仍为 **`pending`**。
+- **`log_tail`** 含 **`bootstrap`** / **`download`** 相关信息。
 
 ---
 
@@ -196,7 +258,6 @@ curl -s -X POST http://127.0.0.1:8765/api/v1/jobs \
 kill $SERVE_PID
 sleep 2
 
-# 再启动一次，确认作业仍可见
 cu serve --port 8765 &
 SERVE_PID=$!
 sleep 2
@@ -205,15 +266,16 @@ kill $SERVE_PID
 ```
 
 预期：作业记录在 SQLite 中持久化；服务重启后通过 API 仍可读出。
-（运行中作业不会自动续跑——线程不持久化，是 P2 已知限制；用户需用 `run` 或 `/run` 重新触发。）
+
+**已知限制（P2）：** 运行中作业**不会**因进程重启自动续跑；用户需再次 **`cu run`** 或 **`POST .../stages/.../run`**。
 
 ---
 
 ## 完成标准
 
-- 所有上述 9 节均通过。
-- 无 stack trace 出现在 stdout/stderr（除 8 节人为构造的失败）。
-- `cu list` 输出可读，时间戳为 ISO8601 UTC。
-- `~/.code-understand/` 不与仓库目录混在一起。
+- 按你选择的范围：**§1–§2** 为最低基线；**§3 真实 loop** 与 **§5–§7** 视环境是否具备 **`claude` / 网络** 与可接受时长选做。
+- 使用 **`CU_SKIP_LOOP`** 时，须在记录中注明「非生产等价验证」。
+- 无未预期的 stack trace（**§8** 人为失败除外）。
+- **`cu list`** 时间戳为 ISO8601（UTC）；数据根与仓库目录分离。
 
-完成后在本仓库提一个 issue 或在 spec 末尾打勾。
+完成后可在本仓库开 issue 或在计划文档末尾打勾。
