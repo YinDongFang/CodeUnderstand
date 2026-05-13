@@ -108,7 +108,7 @@
 | T7 | **详情页 + EventSource**：订阅 SSE，合并轮询兜底 | |
 | T8 | **`GET/PUT .../rewrite/questions`** + 即时解析/直写 JSONL；**`run_build`** 串联 rewrite（无 tmp）+ export + zip | `tests/` mock 子进程 |
 | T9 | **拆分 `run_build`**（`run_export_zip` 等）+ 更新 CLI/REST 文档 | 最小化对 `cu run` 行为变化 |
-| T10 | **验收清单** `docs/.../p3-ubuntu-verification-checklist.md` | |
+| T10 | **验收清单** **`docs/superpowers/plans/p3-ubuntu-verification-checklist.md`** | 与 P2 清单配合使用 |
 
 ---
 
