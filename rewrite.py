@@ -224,6 +224,14 @@ def main() -> int:
         "repo",
         help="项目名（与 pack.sh 第二参数相同，projects 下目录名），用于拼 Claude 目录与 code-understand 输出路径",
     )
+    ap.add_argument(
+        "--single-source", action="store_true",
+        help="仅编辑 sourcePath（沙箱模式下无需同步 copyPath）",
+    )
+    ap.add_argument(
+        "--non-interactive", action="store_true",
+        help="跳过 gedit，直接读取已存在的 tmp 文件并写回",
+    )
     args = ap.parse_args()
     repo = (args.repo or "").strip()
     if not repo or "/" in repo or ".." in repo:
@@ -264,25 +272,44 @@ def main() -> int:
     print("说明: 每行一条 JSON 字符串，顺序与会话中一致；仅改字符串内文字，勿增删行数。")
 
     new_list: list[str] = []
-    while True:
-        subprocess.Popen(
-            ["gedit", tmp_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        input("在编辑器中保存文件后，按 Enter 继续…")
+    if args.non_interactive:
+        if not os.path.isfile(tmp_path):
+            print(
+                f"错误: --non-interactive 模式下 tmp 文件不存在: {tmp_path}",
+                file=sys.stderr,
+            )
+            return 1
         try:
             new_list = load_questions_from_tmp(tmp_path)
         except ValueError as e:
             print(f"读取编辑结果失败: {e}", file=sys.stderr)
-            print("将重新打开 gedit，请修正后保存。", file=sys.stderr)
-            continue
+            return 1
         if len(new_list) != len(questions):
             print(
                 f"错误: 编辑后有效行数为 {len(new_list)}，与原来的 {len(questions)} 不一致，未写回。",
                 file=sys.stderr,
             )
-            print("将重新打开 gedit，请修正后保存。", file=sys.stderr)
-            continue
-        break
+            return 1
+    else:
+        while True:
+            subprocess.Popen(
+                ["gedit", tmp_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            input("在编辑器中保存文件后，按 Enter 继续…")
+            try:
+                new_list = load_questions_from_tmp(tmp_path)
+            except ValueError as e:
+                print(f"读取编辑结果失败: {e}", file=sys.stderr)
+                print("将重新打开 gedit，请修正后保存。", file=sys.stderr)
+                continue
+            if len(new_list) != len(questions):
+                print(
+                    f"错误: 编辑后有效行数为 {len(new_list)}，与原来的 {len(questions)} 不一致，未写回。",
+                    file=sys.stderr,
+                )
+                print("将重新打开 gedit，请修正后保存。", file=sys.stderr)
+                continue
+            break
 
     source_to_new: dict[str, str] = {}
     for old_text, new_text in zip(questions, new_list):
@@ -293,22 +320,27 @@ def main() -> int:
         print("内容无变化，未写回会话文件。")
         return 0
 
-    if not os.path.isfile(copy_path):
-        print(
-            f"错误: copyPath 不存在，无法同步写回: {copy_path}\n"
-            "请先执行 build.sh 生成 sessions/session1/session.jsonl，或检查 OUTPUTS_DIR。",
-            file=sys.stderr,
-        )
-        return 1
-
-    with open(copy_path, "r", encoding="utf-8") as f:
-        raw_copy = f.readlines()
+    if not args.single_source:
+        if not os.path.isfile(copy_path):
+            print(
+                f"错误: copyPath 不存在，无法同步写回: {copy_path}\n"
+                "请先执行 build.sh 生成 sessions/session1/session.jsonl，或检查 OUTPUTS_DIR。",
+                file=sys.stderr,
+            )
+            return 1
+        with open(copy_path, "r", encoding="utf-8") as f:
+            raw_copy = f.readlines()
 
     write_jsonl_with_text_mapping(source_path, raw_source, source_to_new)
-    write_jsonl_with_text_mapping(copy_path, raw_copy, source_to_new)
-    print(
-        f"已按 {len(source_to_new)} 条「源文本→新文本」映射写回 sourcePath 与 copyPath（逐行字面量替换）。"
-    )
+    if not args.single_source:
+        write_jsonl_with_text_mapping(copy_path, raw_copy, source_to_new)
+        print(
+            f"已按 {len(source_to_new)} 条「源文本→新文本」映射写回 sourcePath 与 copyPath（逐行字面量替换）。"
+        )
+    else:
+        print(
+            f"已按 {len(source_to_new)} 条映射写回 sourcePath（单会话模式，未同步 copyPath）。"
+        )
     return 0
 
 
