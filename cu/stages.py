@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 from cu.paths import artifact_root, code_dir, sandbox_home
 from cu.sandbox import bootstrap_sandbox
@@ -18,6 +19,10 @@ from cu.runner import run_script, run_python, RunResult
 STAGES = ("bootstrap", "conversation", "compile", "build")
 
 
+EventCallback = Optional[Callable[[str, str], None]]   # (stage, message)
+PidSink = Optional[Callable[[int], None]]
+
+
 @dataclass
 class JobContext:
     job_id: str
@@ -26,6 +31,12 @@ class JobContext:
     github_url: str
     session_id: str = ""
     claude_project_dir: str = ""
+    on_event: EventCallback = None
+    pid_sink: PidSink = None
+
+    def fire(self, stage: str, message: str) -> None:
+        if self.on_event is not None:
+            self.on_event(stage, message)
 
 
 def _repo_root() -> str:
@@ -61,6 +72,7 @@ def _check(result: RunResult, stage: str, step: str) -> None:
 
 
 def run_bootstrap(ctx: JobContext) -> None:
+    ctx.fire("bootstrap", "start")
     repo_root = _repo_root()
     bootstrap_sandbox(ctx.job_id)
     env = stage_env(
@@ -70,16 +82,20 @@ def run_bootstrap(ctx: JobContext) -> None:
     art = artifact_root(ctx.job_id, ctx.repo)
     os.makedirs(os.path.join(art, "code"), exist_ok=True)
 
+    ctx.fire("bootstrap", "step:download")
     result = run_script(
         os.path.join(repo_root, "download.sh"),
         args=[ctx.zip_url],
         env=env,
         cwd=repo_root,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "bootstrap", "download")
+    ctx.fire("bootstrap", "done")
 
 
 def run_conversation(ctx: JobContext) -> None:
+    ctx.fire("conversation", "start")
     repo_root = _repo_root()
     target_path = code_dir(ctx.job_id, ctx.repo)
     env = stage_env(
@@ -88,11 +104,13 @@ def run_conversation(ctx: JobContext) -> None:
         github_url=ctx.github_url,
     )
 
+    ctx.fire("conversation", "step:loop")
     result = run_script(
         os.path.join(repo_root, "loop.sh"),
         args=[target_path, ctx.repo],
         env=env,
         cwd=repo_root,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "conversation", "loop")
 
@@ -118,15 +136,18 @@ def run_conversation(ctx: JobContext) -> None:
         claude_project_dir=ctx.claude_project_dir,
     )
 
+    ctx.fire("conversation", "step:clean")
     result = run_python(
         os.path.join(repo_root, "clean.py"),
         args=[ctx.repo, ctx.session_id],
         env=env,
         cwd=repo_root,
         stream=True,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "conversation", "clean")
 
+    ctx.fire("conversation", "step:build-doc")
     build_env = dict(env)
     build_env["BUILD_DOC_ONLY"] = "1"
     result = run_script(
@@ -135,11 +156,14 @@ def run_conversation(ctx: JobContext) -> None:
         env=build_env,
         cwd=repo_root,
         stream=True,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "conversation", "build-doc")
+    ctx.fire("conversation", "done")
 
 
 def run_compile(ctx: JobContext) -> None:
+    ctx.fire("compile", "start")
     repo_root = _repo_root()
     art = artifact_root(ctx.job_id, ctx.repo)
     env = stage_env(
@@ -150,22 +174,27 @@ def run_compile(ctx: JobContext) -> None:
     )
     env["ARTIFACT_ROOT"] = art
 
+    ctx.fire("compile", "step:metadata")
     result = run_script(
         os.path.join(repo_root, "scripts", "metadata.sh"),
         args=[ctx.github_url, ctx.repo],
         env=env,
         cwd=repo_root,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "compile", "metadata")
 
+    ctx.fire("compile", "step:clean-artifacts")
     result = run_script(
         os.path.join(repo_root, "scripts", "clean_artifacts.sh"),
         args=[art],
         env=env,
         cwd=repo_root,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "compile", "clean-artifacts")
 
+    ctx.fire("compile", "step:remove-git")
     git_dir = os.path.join(code_dir(ctx.job_id, ctx.repo), ".git")
     if os.path.isdir(git_dir):
         try:
@@ -174,6 +203,7 @@ def run_compile(ctx: JobContext) -> None:
             raise RuntimeError(
                 f"[compile/cleanup] 删除 .git 失败: {git_dir}: {e}"
             ) from e
+    ctx.fire("compile", "done")
 
 
 def run_build(ctx: JobContext) -> None:
@@ -182,6 +212,7 @@ def run_build(ctx: JobContext) -> None:
     P1 阶段尚未接入 rewrite 人工编辑入口，故跳过 rewrite.py；
     rewrite 由 P3 Web UI 实现后再插入到 export_session 之前。
     """
+    ctx.fire("build", "start")
     repo_root = _repo_root()
     art = artifact_root(ctx.job_id, ctx.repo)
     env = stage_env(
@@ -192,21 +223,26 @@ def run_build(ctx: JobContext) -> None:
     )
     env["ARTIFACT_ROOT"] = art
 
+    ctx.fire("build", "step:export-session")
     result = run_script(
         os.path.join(repo_root, "scripts", "export_session.sh"),
         args=[ctx.repo, ctx.session_id],
         env=env,
         cwd=repo_root,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "build", "export-session")
 
+    ctx.fire("build", "step:zip")
     result = run_script(
         os.path.join(repo_root, "zip.sh"),
         args=[art],
         env=env,
         cwd=repo_root,
+        pid_sink=ctx.pid_sink,
     )
     _check(result, "build", "zip")
+    ctx.fire("build", "done")
 
 
 STAGE_RUNNERS = {

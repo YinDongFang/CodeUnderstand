@@ -41,6 +41,26 @@ def test_bootstrap_creates_sandbox_and_calls_download(isolated_env):
     assert env["HOME"] == home
 
 
+def test_bootstrap_invokes_on_event(isolated_env):
+    events: list[tuple[str, str]] = []
+    ctx = JobContext(
+        job_id="test-evt",
+        repo="r",
+        zip_url="https://github.com/o/r/archive/refs/heads/main.zip",
+        github_url="https://github.com/o/r",
+        on_event=lambda s, m: events.append((s, m)),
+    )
+    fake_result = RunResult(returncode=0, stdout="ok\n", stderr="")
+    with patch("cu.stages.run_script", return_value=fake_result):
+        run_bootstrap(ctx)
+    stages = [s for s, _ in events]
+    msgs = [m for _, m in events]
+    assert stages == ["bootstrap", "bootstrap", "bootstrap"]
+    assert msgs[0] == "start"
+    assert msgs[1].startswith("step:")
+    assert msgs[-1] == "done"
+
+
 def test_bootstrap_propagates_failure(isolated_env):
     ctx = JobContext(
         job_id="test-fail",
@@ -68,7 +88,8 @@ def test_full_pipeline_mock(isolated_env, monkeypatch):
 
     calls = []
 
-    def fake_run_script(script, args=None, *, env=None, cwd=None, timeout=None, stream=False):
+    def fake_run_script(script, args=None, **kwargs):
+        env = kwargs.get("env")
         calls.append(("script", script, list(args or []), dict(env or {})))
         from cu.runner import RunResult
         if script.endswith("loop.sh"):
@@ -80,7 +101,8 @@ def test_full_pipeline_mock(isolated_env, monkeypatch):
             return RunResult(0, f"info\n{session_id}\n", "")
         return RunResult(0, "ok\n", "")
 
-    def fake_run_python(script, args=None, *, env=None, cwd=None, timeout=None, stream=False):
+    def fake_run_python(script, args=None, **kwargs):
+        env = kwargs.get("env")
         calls.append(("python", script, list(args or []), dict(env or {})))
         from cu.runner import RunResult
         return RunResult(0, "", "")
