@@ -123,6 +123,7 @@ def run_conversation(ctx: JobContext) -> None:
         args=[ctx.repo, ctx.session_id],
         env=env,
         cwd=repo_root,
+        stream=True,
     )
     _check(result, "conversation", "clean")
 
@@ -133,6 +134,7 @@ def run_conversation(ctx: JobContext) -> None:
         args=[ctx.repo, ctx.session_id],
         env=build_env,
         cwd=repo_root,
+        stream=True,
     )
     _check(result, "conversation", "build-doc")
 

@@ -19,9 +19,20 @@ def run_script(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     timeout: int | None = None,
+    stream: bool = False,
 ) -> RunResult:
-    """通过 bash 解释器执行脚本。"""
+    """通过 bash 解释器执行脚本。
+
+    stream=True 时不重定向 stdout/stderr，子进程直接打印到父进程控制台，
+    返回的 RunResult.stdout / stderr 为空串。
+    """
     cmd = ["bash", script] + (args or [])
+    if stream:
+        try:
+            proc = subprocess.run(cmd, env=env, cwd=cwd, timeout=timeout)
+            return RunResult(returncode=proc.returncode, stdout="", stderr="")
+        except subprocess.TimeoutExpired:
+            return RunResult(returncode=-1, stdout="", stderr=f"timeout after {timeout}s")
     try:
         proc = subprocess.run(
             cmd,
@@ -51,9 +62,20 @@ def run_python(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
     timeout: int | None = None,
+    stream: bool = False,
 ) -> RunResult:
-    """通过 python3 解释器执行脚本。"""
+    """通过 python3 解释器执行脚本。
+
+    stream=True 时不重定向 stdout/stderr，子进程直接打印到父进程控制台，
+    返回的 RunResult.stdout / stderr 为空串。
+    """
     cmd = ["python3", script] + (args or [])
+    if stream:
+        try:
+            proc = subprocess.run(cmd, env=env, cwd=cwd, timeout=timeout)
+            return RunResult(returncode=proc.returncode, stdout="", stderr="")
+        except subprocess.TimeoutExpired:
+            return RunResult(returncode=-1, stdout="", stderr=f"timeout after {timeout}s")
     try:
         proc = subprocess.run(
             cmd,
