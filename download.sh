@@ -68,11 +68,9 @@ mv "$EXTRACTED_DIR" "$TARGET_DIR"
 cd "$TARGET_DIR"
 
 download_out "Initializing git repository ..."
-git config --global user.email "temp@example.com"
-git config --global user.name "temp"
-git init >/dev/null 2>&1
-git add . >/dev/null 2>&1
-git commit -m "Initial commit from $ZIP_URL" >/dev/null 2>&1
+git -c user.email="temp@example.com" -c user.name="temp" init >/dev/null 2>&1
+git -c user.email="temp@example.com" -c user.name="temp" add . >/dev/null 2>&1
+git -c user.email="temp@example.com" -c user.name="temp" commit -m "Initial commit from $ZIP_URL" >/dev/null 2>&1
 
 download_out "All done! Repository initialized in $(pwd)"
 
