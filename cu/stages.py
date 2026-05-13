@@ -177,6 +177,11 @@ def run_compile(ctx: JobContext) -> None:
 
 
 def run_build(ctx: JobContext) -> None:
+    """build 阶段：导出 session 到产物树并 zip。
+
+    P1 阶段尚未接入 rewrite 人工编辑入口，故跳过 rewrite.py；
+    rewrite 由 P3 Web UI 实现后再插入到 export_session 之前。
+    """
     repo_root = _repo_root()
     art = artifact_root(ctx.job_id, ctx.repo)
     env = stage_env(
@@ -186,14 +191,6 @@ def run_build(ctx: JobContext) -> None:
         claude_project_dir=ctx.claude_project_dir,
     )
     env["ARTIFACT_ROOT"] = art
-
-    result = run_python(
-        os.path.join(repo_root, "rewrite.py"),
-        args=[ctx.repo, "--single-source", "--non-interactive"],
-        env=env,
-        cwd=repo_root,
-    )
-    _check(result, "build", "rewrite")
 
     result = run_script(
         os.path.join(repo_root, "scripts", "export_session.sh"),
