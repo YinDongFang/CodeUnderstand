@@ -7,3 +7,6 @@
 __pycache__/
 **/__pycache__/
 *.pyc
+
+# setuptools / pip editable install metadata (local)
+*.egg-info/
