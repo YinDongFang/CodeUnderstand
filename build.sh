@@ -6,6 +6,7 @@
 # 典型调用链：run.sh 在 clean.py 之后先执行本脚本，再执行 pack.sh（pack 只做复制代码 / metadata / zip）。
 #
 # 环境变量（默认与 pack.sh 一致）: OUTPUTS_DIR, PROJECTS_DIR
+# 可选: BUILD_DOC_ONLY=1 仅生成 doc/，跳过 session 复制与归一化（用于沙箱编排器的 conversation 阶段）
 # 依赖: bash, cp, mkdir, jq, claude, shuf
 set -euo pipefail
 
@@ -38,6 +39,7 @@ SA_SRC="${CLAUDE_PROJECTS}/${session}/subagents"
 [[ -d "${PROJECT_DIR}" ]] || { build_err "错误: 项目目录不存在: ${PROJECT_DIR}"; exit 1; }
 [[ -f "${SESSION_FILE}" ]] || { build_err "错误: session 文件不存在: ${SESSION_FILE}"; exit 1; }
 
+if [[ -z "${BUILD_DOC_ONLY:-}" ]]; then
 SESSIONS_ROOT="${DIR}/sessions"
 SESSION1="${SESSIONS_ROOT}/session1"
 DST_JSONL="${SESSION1}/session.jsonl"
@@ -92,6 +94,7 @@ if [[ -d "${SA_SRC}" ]]; then
   build_out "dst: ${SESSION1}/subagents"
 else
   build_out "未找到 subagents 目录（跳过）: ${SA_SRC}"
+fi
 fi
 
 _OPENINGS=(
