@@ -59,9 +59,13 @@ def resolve_source_session_jsonl(repo: str) -> str:
     """
     user = _infer_username()
     repo_slug = repo.replace("_", "-")
-    d = os.path.join(
-        os.path.expanduser("~"), ".claude", "projects", f"-home-{user}-projects-{repo_slug}"
-    )
+    env_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if env_dir and os.path.isdir(env_dir):
+        d = env_dir
+    else:
+        d = os.path.join(
+            os.path.expanduser("~"), ".claude", "projects", f"-home-{user}-projects-{repo_slug}"
+        )
     if not os.path.isdir(d):
         raise FileNotFoundError(f"Claude 项目目录不存在: {d}")
 

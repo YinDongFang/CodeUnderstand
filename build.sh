@@ -32,7 +32,11 @@ command -v jq >/dev/null 2>&1 || { build_err "错误: 需要 jq"; exit 1; }
 repo_slug="${repo//_/-}"
 DIR="${OUTPUTS_DIR}/code-understand-${repo}"
 PROJECT_DIR="${PROJECTS_DIR}/${repo}"
-CLAUDE_PROJECTS="${HOME}/.claude/projects/-home-${USER}-projects-${repo_slug}"
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -d "${CLAUDE_PROJECT_DIR}" ]]; then
+  CLAUDE_PROJECTS="${CLAUDE_PROJECT_DIR}"
+else
+  CLAUDE_PROJECTS="${HOME}/.claude/projects/-home-${USER}-projects-${repo_slug}"
+fi
 SESSION_FILE="${CLAUDE_PROJECTS}/${session}.jsonl"
 SA_SRC="${CLAUDE_PROJECTS}/${session}/subagents"
 

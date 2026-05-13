@@ -15,6 +15,7 @@ def stage_env(
     repo: str,
     session_id: str = "",
     github_url: str = "",
+    claude_project_dir: str = "",
 ) -> dict[str, str]:
     """返回完整的子进程环境变量（基于当前进程 + 作业覆盖）。"""
     home = sandbox_home(job_id)
@@ -30,5 +31,7 @@ def stage_env(
         env["SESSION_ID"] = session_id
     if github_url:
         env["GITHUB_URL"] = github_url
+    if claude_project_dir:
+        env["CLAUDE_PROJECT_DIR"] = claude_project_dir
 
     return env

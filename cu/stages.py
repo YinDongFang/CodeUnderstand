@@ -9,7 +9,7 @@ import os
 import shutil
 from dataclasses import dataclass
 
-from cu.paths import artifact_root, code_dir
+from cu.paths import artifact_root, code_dir, sandbox_home
 from cu.sandbox import bootstrap_sandbox
 from cu.env import stage_env
 from cu.runner import run_script, run_python, RunResult
@@ -25,11 +25,30 @@ class JobContext:
     zip_url: str
     github_url: str
     session_id: str = ""
+    claude_project_dir: str = ""
 
 
 def _repo_root() -> str:
     """本仓库的根目录（cu/ 的父目录）。"""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _find_claude_project_dir(sandbox_home_path: str, session_id: str) -> str:
+    """在沙箱 ~/.claude/projects/ 下搜寻含有 {session_id}.jsonl 的目录。
+
+    返回该目录绝对路径；找不到返回空串。仅看顶层 .jsonl，不进入 subagents 子目录。
+    """
+    root = os.path.join(sandbox_home_path, ".claude", "projects")
+    if not os.path.isdir(root):
+        return ""
+    target = f"{session_id}.jsonl"
+    for entry in os.listdir(root):
+        proj = os.path.join(root, entry)
+        if not os.path.isdir(proj):
+            continue
+        if os.path.isfile(os.path.join(proj, target)):
+            return proj
+    return ""
 
 
 def _check(result: RunResult, stage: str, step: str) -> None:
@@ -82,11 +101,22 @@ def run_conversation(ctx: JobContext) -> None:
         if not lines:
             raise RuntimeError("[conversation/loop] 未从 stdout 解析到 session_id")
         ctx.session_id = lines[-1]
-        env = stage_env(
-            job_id=ctx.job_id, repo=ctx.repo,
-            session_id=ctx.session_id,
-            github_url=ctx.github_url,
+
+    sandbox = sandbox_home(ctx.job_id)
+    found = _find_claude_project_dir(sandbox, ctx.session_id)
+    if not found:
+        raise RuntimeError(
+            f"[conversation/loop] 未在 {sandbox}/.claude/projects/ 下找到 "
+            f"包含 {ctx.session_id}.jsonl 的目录"
         )
+    ctx.claude_project_dir = found
+
+    env = stage_env(
+        job_id=ctx.job_id, repo=ctx.repo,
+        session_id=ctx.session_id,
+        github_url=ctx.github_url,
+        claude_project_dir=ctx.claude_project_dir,
+    )
 
     result = run_python(
         os.path.join(repo_root, "clean.py"),
@@ -114,6 +144,7 @@ def run_compile(ctx: JobContext) -> None:
         job_id=ctx.job_id, repo=ctx.repo,
         session_id=ctx.session_id,
         github_url=ctx.github_url,
+        claude_project_dir=ctx.claude_project_dir,
     )
     env["ARTIFACT_ROOT"] = art
 
@@ -145,6 +176,7 @@ def run_build(ctx: JobContext) -> None:
         job_id=ctx.job_id, repo=ctx.repo,
         session_id=ctx.session_id,
         github_url=ctx.github_url,
+        claude_project_dir=ctx.claude_project_dir,
     )
     env["ARTIFACT_ROOT"] = art
 
