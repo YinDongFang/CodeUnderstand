@@ -30,8 +30,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     print(f"创建作业 {rec.job_id}  repo={rec.repo}")
     start = args.start or "bootstrap"
+    end = args.end
+    if end is not None and JOB_STAGES.index(end) < JOB_STAGES.index(start):
+        print("错误: --end 不能早于 --start", file=sys.stderr)
+        return 1
     try:
-        t = orch.run_stage(rec.job_id, start, on_event=_print_event)
+        t = orch.run_stage(
+            rec.job_id, start, end_stage=end, on_event=_print_event,
+        )
     except (KeyError, ValueError) as e:
         print(f"错误: {e}", file=sys.stderr)
         return 1
@@ -41,6 +47,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"\n作业 {rec.job_id} 终态：{job.status}")
     if job.status != "success" and job.notes:
         print(f"错误摘要：{job.notes[:500]}", file=sys.stderr)
+
+    # 部分阶段跑完后 job.status 为 pending；以区间内各阶段是否 success 判定 CLI 退出码
+    if end is not None and JOB_STAGES.index(end) < len(JOB_STAGES) - 1:
+        stages = orch.get_stages(rec.job_id)
+        si = JOB_STAGES.index(start)
+        ei = JOB_STAGES.index(end)
+        ok = all(
+            stages[JOB_STAGES[i]].status == "success"
+            for i in range(si, ei + 1)
+        )
+        return 0 if ok else 1
     return 0 if job.status == "success" else 1
 
 
@@ -132,6 +149,12 @@ def main() -> int:
     p_run.add_argument("zip_url", help="GitHub archive ZIP URL")
     p_run.add_argument("--job-id", help="自定义 job ID（默认 <repo>-<uuid8>）")
     p_run.add_argument("--start", choices=list(JOB_STAGES), help="从指定阶段开始")
+    p_run.add_argument(
+        "--end",
+        choices=list(JOB_STAGES),
+        default=None,
+        help="在指定阶段结束（含）；缺省一直跑到 build",
+    )
 
     p_list = sub.add_parser("list", help="列出所有作业")
     p_list.add_argument("--status", help="按状态过滤")

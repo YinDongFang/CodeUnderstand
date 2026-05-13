@@ -223,3 +223,28 @@ def test_run_stage_twice_raises(db_env):
         finally:
             barrier.set()
             t.join(timeout=5)
+
+
+def test_run_partial_bootstrap_only_job_pending(db_env):
+    orch.create_job(URL, job_id="j-part")
+    with patch.dict(
+        orch.STAGE_RUNNERS,
+        {s: _fake_stage_runner for s in JOB_STAGES},
+        clear=False,
+    ):
+        orch.run_stage("j-part", "bootstrap", end_stage="bootstrap").join(timeout=5)
+    job = orch.get_job("j-part")
+    assert job.status == "pending"
+    stages = orch.get_stages("j-part")
+    assert stages["bootstrap"].status == "success"
+    assert stages["conversation"].status == "pending"
+    assert stages["compile"].status == "pending"
+    assert stages["build"].status == "pending"
+    from cu.snapshot import snapshot_exists
+    assert snapshot_exists("j-part", "bootstrap")
+
+
+def test_run_stage_end_before_start_raises(db_env):
+    orch.create_job(URL, job_id="j-ord")
+    with pytest.raises(ValueError, match="before start"):
+        orch.run_stage("j-ord", "compile", end_stage="bootstrap")

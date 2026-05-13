@@ -173,19 +173,29 @@ def run_stage(
     job_id: str,
     stage: str,
     *,
+    end_stage: str | None = None,
     on_event=None,
 ) -> threading.Thread:
     """启动指定阶段执行（后台线程）。依赖未满足抛 ValueError，作业不存在抛 KeyError。
 
+    end_stage: 包含式结束阶段；None 表示一直跑到最后一个阶段（build）。
     on_event: 可选回调 (stage, message)，转交给 JobContext 让 stages.py fire。
     """
+    if end_stage is not None:
+        if end_stage not in JOB_STAGES:
+            raise ValueError(f"invalid end_stage: {end_stage}")
+        if JOB_STAGES.index(end_stage) < JOB_STAGES.index(stage):
+            raise ValueError(f"end_stage {end_stage} is before start stage {stage}")
+
     rec = _get_job(job_id)
     if rec is None:
         raise KeyError(f"job not found: {job_id}")
     status_map = _stage_status_map(job_id)
     if not can_run_stage(stage, status_map):
         raise ValueError(f"dependencies not met for stage {stage}: {status_map}")
-    return _start_job_thread(job_id, start_from=stage, on_event=on_event)
+    return _start_job_thread(
+        job_id, start_from=stage, end_stage=end_stage, on_event=on_event,
+    )
 
 
 def rerun_from(
@@ -216,7 +226,9 @@ def rerun_from(
 
     for s in stages_after(stage):
         _reset_stage(job_id, s)
-    return _start_job_thread(job_id, start_from=stage, on_event=on_event)
+    return _start_job_thread(
+        job_id, start_from=stage, end_stage=None, on_event=on_event,
+    )
 
 
 def cancel(job_id: str) -> bool:
@@ -262,7 +274,11 @@ def is_running(job_id: str) -> bool:
 # ---------- Thread runner ----------
 
 def _start_job_thread(
-    job_id: str, *, start_from: str, on_event=None,
+    job_id: str,
+    *,
+    start_from: str,
+    end_stage: str | None = None,
+    on_event=None,
 ) -> threading.Thread:
     with _ACTIVE_LOCK:
         existing = _ACTIVE.get(job_id)
@@ -272,7 +288,7 @@ def _start_job_thread(
         pid_holder: list[int] = []
         t = threading.Thread(
             target=_run_thread,
-            args=(job_id, start_from, cancel_flag, pid_holder, on_event),
+            args=(job_id, start_from, end_stage, cancel_flag, pid_holder, on_event),
             daemon=True,
             name=f"cu-job-{job_id}",
         )
@@ -286,6 +302,7 @@ def _start_job_thread(
 def _run_thread(
     job_id: str,
     start_from: str,
+    end_stage: str | None,
     cancel_flag: threading.Event,
     pid_holder: list[int],
     on_event=None,
@@ -307,8 +324,10 @@ def _run_thread(
     )
 
     idx_start = JOB_STAGES.index(start_from)
+    idx_end = len(JOB_STAGES) - 1 if end_stage is None else JOB_STAGES.index(end_stage)
+    stages_to_run = JOB_STAGES[idx_start : idx_end + 1]
     try:
-        for stage in JOB_STAGES[idx_start:]:
+        for stage in stages_to_run:
             if cancel_flag.is_set():
                 _update_stage(job_id, stage, status="cancelled", ended_at=_now())
                 _update_job(job_id, status="cancelled")
@@ -346,7 +365,10 @@ def _run_thread(
             if stage != "build":
                 save_snapshot(job_id, stage)
 
-        _update_job(job_id, status="success")
+        if idx_end >= len(JOB_STAGES) - 1:
+            _update_job(job_id, status="success")
+        else:
+            _update_job(job_id, status="pending")
     finally:
         # 不主动从 _ACTIVE 删除：线程对象的 is_alive() 会变 False；
         # delete_job 与 _start_job_thread 都会清理或重建条目。
