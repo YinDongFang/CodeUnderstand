@@ -169,18 +169,31 @@ def get_stages(job_id: str) -> dict[str, StageRunRecord]:
     return _get_stages(job_id)
 
 
-def run_stage(job_id: str, stage: str) -> threading.Thread:
-    """启动指定阶段执行（后台线程）。依赖未满足抛 ValueError，作业不存在抛 KeyError。"""
+def run_stage(
+    job_id: str,
+    stage: str,
+    *,
+    on_event=None,
+) -> threading.Thread:
+    """启动指定阶段执行（后台线程）。依赖未满足抛 ValueError，作业不存在抛 KeyError。
+
+    on_event: 可选回调 (stage, message)，转交给 JobContext 让 stages.py fire。
+    """
     rec = _get_job(job_id)
     if rec is None:
         raise KeyError(f"job not found: {job_id}")
     status_map = _stage_status_map(job_id)
     if not can_run_stage(stage, status_map):
         raise ValueError(f"dependencies not met for stage {stage}: {status_map}")
-    return _start_job_thread(job_id, start_from=stage)
+    return _start_job_thread(job_id, start_from=stage, on_event=on_event)
 
 
-def rerun_from(job_id: str, stage: str) -> threading.Thread:
+def rerun_from(
+    job_id: str,
+    stage: str,
+    *,
+    on_event=None,
+) -> threading.Thread:
     """从 stage 重跑：恢复 post-prev 快照（若非 bootstrap）→ 把 stage..build 置 pending → 启动。"""
     rec = _get_job(job_id)
     if rec is None:
@@ -203,7 +216,7 @@ def rerun_from(job_id: str, stage: str) -> threading.Thread:
 
     for s in stages_after(stage):
         _reset_stage(job_id, s)
-    return _start_job_thread(job_id, start_from=stage)
+    return _start_job_thread(job_id, start_from=stage, on_event=on_event)
 
 
 def cancel(job_id: str) -> bool:
@@ -248,7 +261,9 @@ def is_running(job_id: str) -> bool:
 
 # ---------- Thread runner ----------
 
-def _start_job_thread(job_id: str, *, start_from: str) -> threading.Thread:
+def _start_job_thread(
+    job_id: str, *, start_from: str, on_event=None,
+) -> threading.Thread:
     with _ACTIVE_LOCK:
         existing = _ACTIVE.get(job_id)
         if existing and existing.thread.is_alive():
@@ -257,7 +272,7 @@ def _start_job_thread(job_id: str, *, start_from: str) -> threading.Thread:
         pid_holder: list[int] = []
         t = threading.Thread(
             target=_run_thread,
-            args=(job_id, start_from, cancel_flag, pid_holder),
+            args=(job_id, start_from, cancel_flag, pid_holder, on_event),
             daemon=True,
             name=f"cu-job-{job_id}",
         )
@@ -273,6 +288,7 @@ def _run_thread(
     start_from: str,
     cancel_flag: threading.Event,
     pid_holder: list[int],
+    on_event=None,
 ) -> None:
     rec = _get_job(job_id)
     if rec is None:
@@ -287,6 +303,7 @@ def _run_thread(
         session_id=rec.session_id,
         claude_project_dir=rec.claude_project_dir,
         pid_sink=lambda pid: pid_holder.append(pid),
+        on_event=on_event,
     )
 
     idx_start = JOB_STAGES.index(start_from)
