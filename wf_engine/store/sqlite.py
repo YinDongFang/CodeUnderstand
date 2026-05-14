@@ -56,6 +56,8 @@ class SqliteStore:
                     workflow_revision TEXT NOT NULL,
                     status TEXT NOT NULL,
                     input_json TEXT NOT NULL,
+                    name TEXT,
+                    context_json TEXT NOT NULL DEFAULT '{}',
                     tasks_root TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -85,6 +87,17 @@ class SqliteStore:
                 CREATE INDEX IF NOT EXISTS idx_task_nodes_task ON task_nodes(task_id);
                 """
             )
+            self._migrate_tasks_table(c)
+
+    @staticmethod
+    def _migrate_tasks_table(c: sqlite3.Connection) -> None:
+        cols = [str(r[1]) for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "name" not in cols:
+            c.execute("ALTER TABLE tasks ADD COLUMN name TEXT")
+        if "context_json" not in cols:
+            c.execute(
+                "ALTER TABLE tasks ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'"
+            )
 
     def create_task(
         self,
@@ -93,24 +106,30 @@ class SqliteStore:
         workflow_revision: str,
         input_obj: dict[str, Any],
         tasks_root: str,
+        name: str | None = None,
+        context_obj: dict[str, Any] | None = None,
     ) -> str:
         tid = str(uuid.uuid4())
         now = _utc_iso()
+        ctx = {} if context_obj is None else context_obj
         with self.connect() as c:
             c.execute(
                 """INSERT INTO tasks
-                    (id, workflow_key, workflow_revision, status, input_json, tasks_root,
+                    (id, workflow_key, workflow_revision, status, input_json, name,
+                     context_json, tasks_root,
                      created_at, updated_at, interrupt_seq, interrupt_node_id,
                      interrupt_expected_schema, interrupt_request_extras, interrupt_checkpoint,
                      interrupt_response_payload, interrupt_response_consumed,
                      worker_pid, lease_until, worker_generation)
-                    VALUES (?,?,?,?,?,?,?,?,0,NULL,NULL,NULL,NULL,NULL,0,NULL,NULL,0)""",
+                    VALUES (?,?,?,?,?,?,?,?,?,?,0,NULL,NULL,NULL,NULL,NULL,0,NULL,NULL,0)""",
                 (
                     tid,
                     workflow_key,
                     workflow_revision,
                     S.TASK_PENDING,
                     _dumps(input_obj),
+                    name,
+                    _dumps(ctx),
                     tasks_root,
                     now,
                     now,
@@ -125,6 +144,11 @@ class SqliteStore:
             return None
         d = dict(row)
         d["input_json"] = _loads(d["input_json"])
+        raw_ctx = d.get("context_json")
+        if raw_ctx is None or raw_ctx == "":
+            d["context_json"] = {}
+        else:
+            d["context_json"] = _loads(raw_ctx)
         d["interrupt_response_consumed"] = bool(d["interrupt_response_consumed"])
         for k in (
             "interrupt_expected_schema",
@@ -134,6 +158,13 @@ class SqliteStore:
         ):
             d[k] = _loads(d[k]) if d[k] else None
         return d
+
+    def save_task_context(self, task_id: str, obj: dict[str, Any]) -> None:
+        with self.connect() as c:
+            c.execute(
+                "UPDATE tasks SET context_json=?, updated_at=? WHERE id=?",
+                (_dumps(obj), _utc_iso(), task_id),
+            )
 
     def list_tasks(self) -> list[dict[str, Any]]:
         with self.connect() as c:

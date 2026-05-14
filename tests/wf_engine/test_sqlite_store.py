@@ -23,6 +23,66 @@ def test_create_task_roundtrip():
         assert row["status"] == "pending"
 
 
+def test_create_task_with_name_and_context_roundtrip(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    tid = store.create_task(
+        name="我的任务",
+        workflow_key="w",
+        workflow_revision="1",
+        input_obj={"a": 1},
+        context_obj={"env": "dev"},
+        tasks_root=str(tmp_path / "runs"),
+    )
+    row = store.get_task(tid)
+    assert row is not None
+    assert row["name"] == "我的任务"
+    assert row["input_json"] == {"a": 1}
+    assert row["context_json"] == {"env": "dev"}
+
+    store.save_task_context(tid, {"env": "dev", "k": 2})
+    row2 = store.get_task(tid)
+    assert row2 is not None
+    assert row2["context_json"] == {"env": "dev", "k": 2}
+
+
+def test_migrate_adds_name_and_context_columns(tmp_path: Path) -> None:
+    import sqlite3
+
+    db = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            workflow_key TEXT NOT NULL,
+            workflow_revision TEXT NOT NULL,
+            status TEXT NOT NULL,
+            input_json TEXT NOT NULL,
+            tasks_root TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            interrupt_seq INTEGER NOT NULL DEFAULT 0,
+            interrupt_node_id TEXT,
+            interrupt_expected_schema TEXT,
+            interrupt_request_extras TEXT,
+            interrupt_checkpoint TEXT,
+            interrupt_response_payload TEXT,
+            interrupt_response_consumed INTEGER NOT NULL DEFAULT 0,
+            worker_pid INTEGER,
+            lease_until TEXT,
+            worker_generation INTEGER NOT NULL DEFAULT 0
+        )"""
+    )
+    conn.close()
+
+    store = SqliteStore(db)
+    store.init_schema()
+    with store.connect() as c:
+        cols = [str(r[1]) for r in c.execute("PRAGMA table_info(tasks)")]
+    assert "name" in cols and "context_json" in cols
+
+
 def test_reconcile_stale_worker_marks_task_stalled(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
