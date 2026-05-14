@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -148,14 +149,27 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
             detail=_err("unknown_workflow", f"workflow_key not registered: {body.workflow_key!r}"),
         ) from None
 
-    tid = cp.store.create_task(
-        workflow_key=wf.key,
-        workflow_revision=wf.revision,
-        input_obj=body.input,
-        name=body.name.strip() or None,
-        context_obj=body.context,
-        tasks_root=str(cp.tasks_root),
-    )
+    raw_name = body.name.strip() or None
+    try:
+        tid = cp.store.create_task(
+            workflow_key=wf.key,
+            workflow_revision=wf.revision,
+            input_obj=body.input,
+            name=raw_name,
+            context_obj=body.context,
+            tasks_root=str(cp.tasks_root),
+        )
+    except sqlite3.IntegrityError as e:
+        msg = str(e).lower()
+        if "tasks.name" in msg or "idx_tasks_name_unique" in msg:
+            raise HTTPException(
+                status_code=409,
+                detail=_err(
+                    "duplicate_task_name",
+                    f"task name already exists: {raw_name!r}",
+                ),
+            ) from e
+        raise
     root = _task_root(cp, tid)
     layout = task_layout(root)
     layout.workspace.mkdir(parents=True, exist_ok=True)

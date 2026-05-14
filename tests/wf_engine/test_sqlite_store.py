@@ -2,6 +2,9 @@ import tempfile
 import os
 from pathlib import Path
 
+import pytest
+import sqlite3
+
 from wf_engine import status as S
 from wf_engine.store.sqlite import SqliteStore, _utc_iso
 
@@ -45,6 +48,27 @@ def test_create_task_with_name_and_context_roundtrip(tmp_path: Path) -> None:
     row2 = store.get_task(tid)
     assert row2 is not None
     assert row2["context_json"] == {"env": "dev", "k": 2}
+
+
+def test_create_task_rejects_duplicate_name(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    store.create_task(
+        name="only-once",
+        workflow_key="w",
+        workflow_revision="1",
+        input_obj={},
+        tasks_root=str(tmp_path / "runs"),
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_task(
+            name="only-once",
+            workflow_key="w",
+            workflow_revision="1",
+            input_obj={},
+            tasks_root=str(tmp_path / "runs"),
+        )
 
 
 def test_migrate_adds_name_and_context_columns(tmp_path: Path) -> None:

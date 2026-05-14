@@ -225,6 +225,14 @@
   word-break: break-word;
 }
 
+.node-rerun-btn {
+  margin-top: 0.15rem;
+  align-self: stretch;
+  font-size: 0.68rem;
+  padding: 0.25rem 0.35rem;
+  text-align: center;
+}
+
 .meta {
   display: grid;
   grid-template-columns: 8rem 1fr;

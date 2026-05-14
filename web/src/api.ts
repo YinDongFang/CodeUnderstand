@@ -119,3 +119,14 @@ export function resolveInterrupt(
     body: JSON.stringify(body),
   }).then((r) => parseJson<{ status: string }>(r))
 }
+
+export function rerunTask(
+  taskId: string,
+  from_node_id: string,
+): Promise<{ status: string }> {
+  return fetch(`${BASE}/tasks/${encodeURIComponent(taskId)}/rerun`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from_node_id }),
+  }).then((r) => parseJson<{ status: string }>(r))
+}

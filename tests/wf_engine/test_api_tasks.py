@@ -81,6 +81,23 @@ def test_post_tasks_returns_201_and_get_shows_succeeded_nodes(api_setup):
     asyncio.run(_run())
 
 
+def test_post_tasks_duplicate_name_returns_409(api_setup):
+    app = api_setup["app"]
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            body = {"workflow_key": "api_wf", "name": " same-name ", "input": {}}
+            r = await client.post("/tasks", json=body)
+            assert r.status_code == 201
+            r2 = await client.post("/tasks", json=body)
+            assert r2.status_code == 409
+            out = r2.json()
+            assert out["error"]["code"] == "duplicate_task_name"
+
+    asyncio.run(_run())
+
+
 def test_list_tasks_returns_summary(api_setup):
     app = api_setup["app"]
 

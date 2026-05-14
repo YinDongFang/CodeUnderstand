@@ -6,6 +6,7 @@ import {
   fetchTasks,
   fetchWorkflows,
   resolveInterrupt,
+  rerunTask,
   type TaskDetail,
   type TaskNode,
   type TaskSummary,
@@ -14,6 +15,17 @@ import {
 import './App.css'
 
 const POLL_MS = 2000
+
+/** 终态：完成时间取 `updated_at`（末次状态变更）。 */
+const TASK_TERMINAL = new Set(['succeeded', 'failed', 'stalled'])
+
+function formatTaskDisplayTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`
+  const t = Date.parse(normalized)
+  if (Number.isNaN(t)) return iso
+  return new Date(t).toLocaleString()
+}
 
 const LOG_NODE_MARKER = /\[\d+:[^\]]+\]/
 
@@ -228,6 +240,8 @@ export default function App() {
   const [inputForm, setInputForm] = useState<Record<string, string>>({})
   const [createErr, setCreateErr] = useState<string | null>(null)
   const [createBusy, setCreateBusy] = useState(false)
+  const [rerunBusyNodeId, setRerunBusyNodeId] = useState<string | null>(null)
+  const [nodeActionErr, setNodeActionErr] = useState<string | null>(null)
 
   const detailHasActiveNode =
     detail?.nodes.some(
@@ -294,6 +308,10 @@ export default function App() {
     logCursorRef.current = 0
     setLogLines([])
     setLogsErr(null)
+  }, [selectedId])
+
+  useEffect(() => {
+    setNodeActionErr(null)
   }, [selectedId])
 
   useEffect(() => {
@@ -396,6 +414,36 @@ export default function App() {
     }
   }, [detail?.interrupt, resolveDraft, selectedId])
 
+  const onRerunFromNode = useCallback(
+    async (nodeId: string) => {
+      if (!selectedId || !detail) return
+      if (
+        !window.confirm(
+          `从节点「${nodeId}」重新执行？将重置该节点及后续节点并拉取此前快照。`,
+        )
+      ) {
+        return
+      }
+      setNodeActionErr(null)
+      setRerunBusyNodeId(nodeId)
+      try {
+        await rerunTask(selectedId, nodeId)
+        logCursorRef.current = 0
+        setLogLines([])
+        setLogsErr(null)
+        setDetail(await fetchTask(selectedId))
+        const rows = await fetchTasks()
+        setTasks(rows)
+        setTasksErr(null)
+      } catch (e) {
+        setNodeActionErr(e instanceof Error ? e.message : String(e))
+      } finally {
+        setRerunBusyNodeId(null)
+      }
+    },
+    [detail, selectedId],
+  )
+
   const selectedWorkflow = workflowOptions.find((w) => w.key === newWorkflowKey)
   const inputFields = parseInputSchema(selectedWorkflow?.input_schema ?? null)
 
@@ -496,6 +544,14 @@ export default function App() {
                   <dd>
                     <span className={chipClass(detail.status)}>{detail.status}</span>
                   </dd>
+                  <dt>创建时间</dt>
+                  <dd>{formatTaskDisplayTime(detail.created_at)}</dd>
+                  <dt>完成时间</dt>
+                  <dd>
+                    {TASK_TERMINAL.has(detail.status)
+                      ? formatTaskDisplayTime(detail.updated_at)
+                      : '—'}
+                  </dd>
                 </dl>
 
                 {hasDictContent(detail.input) && <KvBlock title="输入 (input)" data={detail.input} />}
@@ -505,6 +561,7 @@ export default function App() {
                 )}
 
                 <h3 className="section-heading">节点（顺序）</h3>
+                {nodeActionErr && <p className="err">{nodeActionErr}</p>}
                 <div className="node-strip" role="list" aria-label="工作流节点，按执行顺序从左到右">
                   {sortedNodes(detail.nodes).map((n, idx) => {
                     const timing = nodeTiming(n, nowTick)
@@ -534,6 +591,22 @@ export default function App() {
                             )}
                             {errMsg && <div className="node-card-err">{errMsg}</div>}
                           </div>
+                          <button
+                            type="button"
+                            className="ghost-btn node-rerun-btn"
+                            disabled={
+                              detail.status === 'waiting_human' ||
+                              rerunBusyNodeId === n.node_id
+                            }
+                            title={
+                              detail.status === 'waiting_human'
+                                ? '等待人工处理时不可重跑'
+                                : '从该节点重新执行（POST /tasks/…/rerun）'
+                            }
+                            onClick={() => void onRerunFromNode(n.node_id)}
+                          >
+                            {rerunBusyNodeId === n.node_id ? '提交中…' : '从此节点重跑'}
+                          </button>
                         </div>
                       </Fragment>
                     )

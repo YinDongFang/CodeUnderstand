@@ -98,6 +98,14 @@ class SqliteStore:
             c.execute(
                 "ALTER TABLE tasks ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'"
             )
+        # One non-null name per task (multiple NULL names allowed).
+        c.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_name_unique
+            ON tasks(name)
+            WHERE name IS NOT NULL
+            """
+        )
 
     def create_task(
         self,
