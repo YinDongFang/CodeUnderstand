@@ -16,6 +16,7 @@ from wf_engine.lease_util import parse_utc_iso, pid_alive
 from wf_engine.paths import task_layout
 from wf_engine.sandbox import resolve_node_workdir
 from wf_engine.server.state import ControlPlaneState
+from wf_engine.task_timing import compute_active_duration_seconds
 from wf_engine.unzip_util import UnsafeArchiveError, extract_zip_safely
 
 router = APIRouter()
@@ -99,6 +100,19 @@ def _serialize_node(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _active_duration_seconds(row: dict[str, Any]) -> int:
+    return compute_active_duration_seconds(
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+        status=str(row["status"]),
+        interrupt_wall_seconds_accumulated=int(
+            row.get("interrupt_wall_seconds_accumulated") or 0
+        ),
+        waiting_human_since=row.get("waiting_human_since"),
+        now=datetime.now(timezone.utc),
+    )
+
+
 def _serialize_task_detail(row: dict[str, Any], nodes: list[dict[str, Any]]) -> dict[str, Any]:
     body: dict[str, Any] = {
         "id": row["id"],
@@ -111,6 +125,8 @@ def _serialize_task_detail(row: dict[str, Any], nodes: list[dict[str, Any]]) -> 
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "worker_generation": row["worker_generation"],
+        "execution_count": int(row.get("execution_count") or 0),
+        "active_duration_seconds": _active_duration_seconds(row),
         "nodes": [_serialize_node(n) for n in nodes],
     }
     if row["status"] == S.TASK_WAITING_HUMAN:
@@ -180,6 +196,7 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
     cp.store.init_task_nodes(tid, [n.id for n in wf.nodes])
     cp.store.set_task_status(tid, S.TASK_RUNNING)
     _spawn_for_task(cp, task_id=tid, workflow_key=wf.key)
+    cp.store.mark_first_run_scheduled(tid)
     return CreateTaskResponse(task_id=tid)
 
 
@@ -195,6 +212,8 @@ def list_tasks(request: Request) -> list[dict[str, Any]]:
             "status": r["status"],
             "workflow_key": r["workflow_key"],
             "created_at": r["created_at"],
+            "execution_count": int(r.get("execution_count") or 0),
+            "active_duration_seconds": _active_duration_seconds(r),
         }
         for r in rows
     ]

@@ -216,7 +216,7 @@ def test_second_open_interrupt_flushes_pending_segment(tmp_path: Path) -> None:
     store.open_interrupt(
         tid, node_id="a", expected_schema=None, ui=None, checkpoint=None
     )
-    time.sleep(0.6)
+    time.sleep(1.1)
     store.open_interrupt(
         tid, node_id="a", expected_schema=None, ui=None, checkpoint=None
     )

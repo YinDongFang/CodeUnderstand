@@ -74,6 +74,9 @@ def test_post_tasks_returns_201_and_get_shows_succeeded_nodes(api_setup):
             assert len(body["nodes"]) == 1
             assert body["nodes"][0]["node_id"] == "step1"
             assert body["nodes"][0]["status"] == S.NODE_SUCCESS
+            assert body["execution_count"] == 1
+            assert isinstance(body["active_duration_seconds"], int)
+            assert body["active_duration_seconds"] >= 0
 
             tr = tasks_root / task_id
             assert (task_layout(tr).workspace / "out.txt").read_text(encoding="utf-8") == "x"
@@ -117,6 +120,8 @@ def test_list_tasks_returns_summary(api_setup):
             assert rows[0]["status"] == S.TASK_SUCCEEDED
             assert rows[0]["name"] is None
             assert "created_at" in rows[0]
+            assert rows[0]["execution_count"] == 1
+            assert isinstance(rows[0]["active_duration_seconds"], int)
 
     asyncio.run(_run())
 
