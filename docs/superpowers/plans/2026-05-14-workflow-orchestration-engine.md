@@ -1,6 +1,6 @@
 # Workflow orchestration engine implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Below, **`- [x]`** marks steps that are done in this repo; **`- [ ]`** would mean not started.
 
 **Goal:** Deliver a single-machine Python library (`wf_engine`) that registers serial workflows in-process, runs each task in an isolated subprocess, persists state to SQLite, supports per-node whitelist zips and interrupt/resume plus node-level rerun with safe unzip, and exposes a minimal FastAPI control plane plus a Vite/React ops UI polling those APIs.
 
@@ -9,6 +9,8 @@
 **Tech stack:** Python 3.12+, FastAPI, Uvicorn, Pydantic v2, SQLite3 (`PRAGMA journal_mode=WAL`), `jsonschema` for interrupt payload validation, pytest; frontend: Vite 5+, React 18+, TypeScript.
 
 **Spec source:** `docs/superpowers/specs/2026-05-14-workflow-orchestration-engine-design.md`
+
+**Implementation status:** Task 1–11 are implemented on branch `flow` (`wf_engine/`, `web/`, `tests/wf_engine/`). Run `pytest tests/wf_engine/` to verify. Extra modules vs. the file map below: `wf_engine/lease_util.py`, `wf_engine/sandbox.py`. Spec-gap items OE-001…OE-007 are closed per `docs/superpowers/issues/2026-05-14-wf-engine-spec-gap-closure.md` (landed with `288ba5e` among others). **Still outstanding** (plan “Gaps” §): log rotation §3.5.9, maximum zip size, multi-uvicorn / multi-writer guard beyond `workers=1`.
 
 ---
 
@@ -57,7 +59,7 @@ Repository root assumes this plan is added alongside new code (adjust paths if y
 - Create: `wf_engine/paths.py`
 - Test: `tests/wf_engine/test_paths.py`
 
-- [ ] **Step 1: Write failing test for path layout**
+- [x] **Step 1: Write failing test for path layout**
 
 ```python
 # tests/wf_engine/test_paths.py
@@ -72,13 +74,13 @@ def test_task_layout_under_tasks_root():
     assert lo.logs == root / "logs"
 ```
 
-- [ ] **Step 2: Run test — expect failure**
+- [x] **Step 2: Run test — expect failure**
 
 Run: `pytest tests/wf_engine/test_paths.py -v`
 
 Expected: import error or missing `task_layout`.
 
-- [ ] **Step 3: Add `pyproject.toml`**
+- [x] **Step 3: Add `pyproject.toml`**
 
 ```toml
 [project]
@@ -100,7 +102,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 ```
 
-- [ ] **Step 4: Implement `status.py` and `paths.py`**
+- [x] **Step 4: Implement `status.py` and `paths.py`**
 
 ```python
 # wf_engine/status.py
@@ -148,11 +150,11 @@ def task_layout(task_root: Path) -> TaskLayout:
 """Workflow orchestration engine (see project spec)."""
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `pytest tests/wf_engine/test_paths.py -v` — expect PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml wf_engine tests/wf_engine
@@ -169,7 +171,7 @@ git commit -m "feat(wf_engine): scaffold package, paths, status constants"
 - Create: `wf_engine/store/sqlite.py`
 - Test: `tests/wf_engine/test_sqlite_store.py`
 
-- [ ] **Step 1: Failing test — create task and load**
+- [x] **Step 1: Failing test — create task and load**
 
 ```python
 # tests/wf_engine/test_sqlite_store.py
@@ -196,11 +198,11 @@ def test_create_task_roundtrip():
         assert row["status"] == "pending"
 ```
 
-- [ ] **Step 2: Run — expect fail**
+- [x] **Step 2: Run — expect fail**
 
 Run: `pytest tests/wf_engine/test_sqlite_store.py -v`
 
-- [ ] **Step 3: Implement `SqliteStore`**
+- [x] **Step 3: Implement `SqliteStore`**
 
 ```python
 # wf_engine/store/__init__.py
@@ -474,9 +476,9 @@ class SqliteStore:
             )
 ```
 
-- [ ] **Step 4: Run tests** — PASS.
+- [x] **Step 4: Run tests** — PASS.
 
-- [ ] **Step 5: Commit** — `feat(wf_engine): add SQLite store and schema`
+- [x] **Step 5: Commit** — `feat(wf_engine): add SQLite store and schema`
 
 ---
 
@@ -488,7 +490,7 @@ class SqliteStore:
 - Create: `wf_engine/engine.py`
 - Test: `tests/wf_engine/test_engine_registry.py`
 
-- [ ] **Step 1: Failing test duplicate key**
+- [x] **Step 1: Failing test duplicate key**
 
 ```python
 # tests/wf_engine/test_engine_registry.py
@@ -510,9 +512,9 @@ def test_duplicate_workflow_key_rejected():
         eng.register_workflow(wf)
 ```
 
-- [ ] **Step 2: Run — fail**
+- [x] **Step 2: Run — fail**
 
-- [ ] **Step 3: Implement `Workflow` / `NodeSpec` / `Engine`**
+- [x] **Step 3: Implement `Workflow` / `NodeSpec` / `Engine`**
 
 ```python
 # wf_engine/workflow.py
@@ -597,11 +599,11 @@ class NodeContext:
     human_input: dict[str, Any] | None
 ```
 
-- [ ] **Step 4: Update `wf_engine/__init__.py`** to export `Engine`, `Workflow`, `NodeContext`.
+- [x] **Step 4: Update `wf_engine/__init__.py`** to export `Engine`, `Workflow`, `NodeContext`.
 
-- [ ] **Step 5: Run tests** — PASS.
+- [x] **Step 5: Run tests** — PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ---
 
@@ -613,7 +615,7 @@ class NodeContext:
 - Modify: `wf_engine/__init__.py`
 - Test: `tests/wf_engine/test_interrupt.py`
 
-- [ ] **Step 1: Test controlled interrupt carries schema**
+- [x] **Step 1: Test controlled interrupt carries schema**
 
 ```python
 # tests/wf_engine/test_interrupt.py
@@ -627,7 +629,7 @@ def test_interrupt_raises_controlled():
     assert ei.value.expected_schema is None
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```python
 # wf_engine/interrupt.py
@@ -657,9 +659,9 @@ def interrupt(
     )
 ```
 
-- [ ] **Step 3: Run test** — PASS.
+- [x] **Step 3: Run test** — PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ---
 
@@ -672,7 +674,7 @@ def interrupt(
 - Test: `tests/wf_engine/test_zip_util.py`
 - Test: `tests/wf_engine/test_unzip_util.py`
 
-- [ ] **Step 1: Tests**
+- [x] **Step 1: Tests**
 
 ```python
 # tests/wf_engine/test_zip_util.py
@@ -715,11 +717,11 @@ def test_extract_rejects_zip_slip():
             extract_zip_safely(buf.getvalue(), dest)
 ```
 
-- [ ] **Step 2: Run tests — fail until implemented**
+- [x] **Step 2: Run tests — fail until implemented**
 
 Run: `pytest tests/wf_engine/test_zip_util.py tests/wf_engine/test_unzip_util.py -v`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 # wf_engine/zip_util.py
@@ -770,9 +772,9 @@ def extract_zip_safely(data: bytes, dest_dir: Path) -> None:
                 target.write_bytes(zf.read(name))
 ```
 
-- [ ] **Step 4: Run tests** — PASS.
+- [x] **Step 4: Run tests** — PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ---
 
@@ -798,7 +800,7 @@ def run_once(
     ...
 ```
 
-- [ ] **Step 1: `test_runner_serial.py` — 三节顺序成功**
+- [x] **Step 1: `test_runner_serial.py` — 三节顺序成功**
 
 ```python
 # tests/wf_engine/test_runner_serial.py
@@ -855,7 +857,7 @@ def test_three_nodes_linear_success():
 
 Run: `pytest tests/wf_engine/test_runner_serial.py -v` — 在 `run_once` 未实现时期待 **FAIL**。
 
-- [ ] **Step 2: `test_runner_interrupt.py`**
+- [x] **Step 2: `test_runner_interrupt.py`**
 
 ```python
 # tests/wf_engine/test_runner_interrupt.py
@@ -913,7 +915,7 @@ def test_interrupt_then_resolve_completes_node():
 
 Run: `pytest tests/wf_engine/test_runner_interrupt.py -v` — 实现前 **FAIL**。
 
-- [ ] **Step 3: 实现 `Runner.run_once`**
+- [x] **Step 3: 实现 `Runner.run_once`**
 
 以 `wf_engine/runner.py` 实现，**必须**满足：
 
@@ -925,9 +927,9 @@ Run: `pytest tests/wf_engine/test_runner_interrupt.py -v` — 实现前 **FAIL**
 
 实现完成后使 Step 1–2 测试通过。
 
-- [ ] **Step 4: Run** — `pytest tests/wf_engine/test_runner_serial.py tests/wf_engine/test_runner_interrupt.py -v`
+- [x] **Step 4: Run** — `pytest tests/wf_engine/test_runner_serial.py tests/wf_engine/test_runner_interrupt.py -v`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ---
 
@@ -939,13 +941,13 @@ Run: `pytest tests/wf_engine/test_runner_interrupt.py -v` — 实现前 **FAIL**
 - Create: `wf_engine/supervisor.py`
 - Test: `tests/wf_engine/test_supervisor_spawn.py` (use `sys.executable -m wf_engine.worker_main` with env `WF_ENGINE_TASK_ID`, minimal argv)
 
-- [ ] **Step 1:** `worker_main` loads DB path + tasks root from env or argv, reconstructs `Engine` **without** user workflows — worker must receive **serialized workflow key only** and reload registry: **MVP constraint:** worker subprocess imports a **callback module** path also set by env `WF_ENGINE_REGISTRY_MODULE=yourapp.registry` that calls `register_all(engine)` so user code is loadable. Document in README fragment at end of plan.
+- [x] **Step 1:** `worker_main` loads DB path + tasks root from env or argv, reconstructs `Engine` **without** user workflows — worker must receive **serialized workflow key only** and reload registry: **MVP constraint:** worker subprocess imports a **callback module** path also set by env `WF_ENGINE_REGISTRY_MODULE=yourapp.registry` that calls `register_all(engine)` so user code is loadable. Document in README fragment at end of plan.
 
 Implement `supervisor.spawn_worker(task_id)` using `subprocess.Popen` and `store.acquire_lease`.
 
-- [ ] **Step 2: Integration test:** create task in DB, register wf in parent, spawn worker that runs one trivial node; assert task succeeded.
+- [x] **Step 2: Integration test:** create task in DB, register wf in parent, spawn worker that runs one trivial node; assert task succeeded.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ---
 
@@ -968,9 +970,9 @@ Endpoints:
 
 Use Pydantic models; **409** on illegal transitions.
 
-- [ ] **Step 1: Test create + get roundtrip** (mock spawn or use real subprocess if fast enough).
+- [x] **Step 1: Test create + get roundtrip** (mock spawn or use real subprocess if fast enough).
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ---
 
@@ -982,11 +984,11 @@ Use Pydantic models; **409** on illegal transitions.
 - Modify: `wf_engine/store/sqlite.py` — helpers to list successful predecessors' zip paths in order
 - Test: `tests/wf_engine/test_rerun_api.py`
 
-- [ ] **Step 1: Test rerun clears workspace and restores files from zips.**
+- [x] **Step 1: Test rerun clears workspace and restores files from zips.**
 
-- [ ] **Step 2: Test missing zip → 409** `missing_snapshot`.
+- [x] **Step 2: Test missing zip → 409** `missing_snapshot`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ---
 
@@ -996,17 +998,17 @@ Use Pydantic models; **409** on illegal transitions.
 
 - Create: `web/package.json`, `web/vite.config.ts`, `web/index.html`, `web/src/main.tsx`, `web/src/App.tsx`, `web/src/api.ts`
 
-- [ ] **Step 1: Scaffold** with `npm create vite@latest web -- --template react-ts`.
+- [x] **Step 1: Scaffold** with `npm create vite@latest web -- --template react-ts`.
 
-- [ ] **Step 2:** Implement layout: left `TaskList`, right `TaskDetail` with `nodes.map` status chips, polling `GET /api/tasks` and `/api/tasks/:id` every 2s (simple `setInterval`).
+- [x] **Step 2:** Implement layout: left `TaskList`, right `TaskDetail` with `nodes.map` status chips, polling `GET /api/tasks` and `/api/tasks/:id` every 2s (simple `setInterval`).
 
-- [ ] **Step 3:** Log panel: `GET /api/tasks/:id/logs?cursor=`.
+- [x] **Step 3:** Log panel: `GET /api/tasks/:id/logs?cursor=`.
 
-- [ ] **Step 4:** When `interrupt` present, show raw JSON and a textarea to post `resolve` via `fetch`.
+- [x] **Step 4:** When `interrupt` present, show raw JSON and a textarea to post `resolve` via `fetch`.
 
-- [ ] **Step 5:** Document dev: `uvicorn` on `:8000`, Vite proxy `/api` → `http://127.0.0.1:8000`.
+- [x] **Step 5:** Document dev: `uvicorn` on `:8000`, Vite proxy `/api` → `http://127.0.0.1:8000`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ---
 
@@ -1016,7 +1018,7 @@ Use Pydantic models; **409** on illegal transitions.
 
 - Create: `wf_engine/README.md` (short: registry module env, `Engine.serve`, example workflow)
 
-- [ ] **Step 1:** Paste minimal example:
+- [x] **Step 1:** Paste minimal example:
 
 ```python
 from wf_engine import Engine, Workflow, NodeContext, interrupt
@@ -1033,7 +1035,7 @@ def build(engine: Engine):
     engine.register_workflow(wf)
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ---
 
