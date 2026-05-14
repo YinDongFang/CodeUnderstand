@@ -231,7 +231,6 @@ def test_rerun_rejected_when_worker_lease_active(tmp_path: Path):
 
     tid = store.create_task(
         workflow_key="busy_wf",
-        workflow_revision="1",
         input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )

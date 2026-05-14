@@ -24,7 +24,6 @@ class Engine:
         return [
             {
                 "key": wf.key,
-                "revision": wf.revision,
                 "input_schema": wf.input_schema,
             }
             for wf in wfs

@@ -18,7 +18,6 @@ def test_create_task_roundtrip():
         store.init_schema()
         tid = store.create_task(
             workflow_key="wf1",
-            workflow_revision="rev-a",
             input_obj={"k": 1},
             tasks_root=str(Path(td) / "runs"),
         )
@@ -37,8 +36,7 @@ def test_create_task_with_name_and_context_roundtrip(tmp_path: Path) -> None:
     tid = store.create_task(
         name="我的任务",
         workflow_key="w",
-        workflow_revision="1",
-        input_obj={"a": 1},
+input_obj={"a": 1},
         context_obj={"env": "dev"},
         tasks_root=str(tmp_path / "runs"),
     )
@@ -61,15 +59,13 @@ def test_create_task_rejects_duplicate_name(tmp_path: Path) -> None:
     store.create_task(
         name="only-once",
         workflow_key="w",
-        workflow_revision="1",
-        input_obj={},
+input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )
     with pytest.raises(sqlite3.IntegrityError):
         store.create_task(
             name="only-once",
             workflow_key="w",
-            workflow_revision="1",
             input_obj={},
             tasks_root=str(tmp_path / "runs"),
         )
@@ -120,8 +116,7 @@ def test_reconcile_stale_worker_marks_task_stalled(tmp_path: Path) -> None:
     store.init_schema()
     tid = store.create_task(
         workflow_key="wf1",
-        workflow_revision="rev-a",
-        input_obj={},
+input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )
     store.init_task_nodes(tid, ["only"])
@@ -144,8 +139,7 @@ def test_mark_first_run_scheduled_sets_execution_count(tmp_path: Path) -> None:
     store.init_schema()
     tid = store.create_task(
         workflow_key="wf1",
-        workflow_revision="r",
-        input_obj={},
+input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )
     assert store.get_task(tid)["execution_count"] == 0
@@ -159,8 +153,7 @@ def test_prepare_rerun_increments_execution_count(tmp_path: Path) -> None:
     store.init_schema()
     tid = store.create_task(
         workflow_key="wf1",
-        workflow_revision="r",
-        input_obj={},
+input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )
     store.mark_first_run_scheduled(tid)
@@ -176,8 +169,7 @@ def test_apply_resolve_accumulates_interrupt_wall_and_bumps_exec(tmp_path: Path)
     store.init_schema()
     tid = store.create_task(
         workflow_key="wf1",
-        workflow_revision="r",
-        input_obj={},
+input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )
     store.init_task_nodes(tid, ["a"])
@@ -286,8 +278,7 @@ def test_second_open_interrupt_flushes_pending_segment(tmp_path: Path) -> None:
     store.init_schema()
     tid = store.create_task(
         workflow_key="wf1",
-        workflow_revision="r",
-        input_obj={},
+input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )
     store.init_task_nodes(tid, ["a"])

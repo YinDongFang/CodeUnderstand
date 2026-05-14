@@ -56,7 +56,6 @@ export type TaskDetail = {
   id: string
   name: string | null
   workflow_key: string
-  workflow_revision: string
   status: string
   input: Record<string, unknown>
   context: Record<string, unknown>
@@ -71,7 +70,6 @@ export type TaskDetail = {
 
 export type WorkflowInfo = {
   key: string
-  revision: string
   input_schema?: Record<string, unknown> | null
 }
 

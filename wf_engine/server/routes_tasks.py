@@ -118,7 +118,6 @@ def _serialize_task_detail(row: dict[str, Any], nodes: list[dict[str, Any]]) -> 
         "id": row["id"],
         "name": row.get("name"),
         "workflow_key": row["workflow_key"],
-        "workflow_revision": row["workflow_revision"],
         "status": row["status"],
         "input": row["input_json"],
         "context": row.get("context_json") or {},
@@ -171,7 +170,6 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
     try:
         tid = cp.store.create_task(
             workflow_key=wf.key,
-            workflow_revision=wf.revision,
             input_obj=body.input,
             name=raw_name,
             context_obj=body.context,

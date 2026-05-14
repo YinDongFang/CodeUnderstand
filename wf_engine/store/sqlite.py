@@ -208,7 +208,6 @@ class SqliteStore:
         self,
         *,
         workflow_key: str,
-        workflow_revision: str,
         input_obj: dict[str, Any],
         tasks_root: str,
         name: str | None = None,
@@ -231,7 +230,7 @@ class SqliteStore:
                 (
                     tid,
                     workflow_key,
-                    workflow_revision,
+                    "",
                     S.TASK_PENDING,
                     _dumps(input_obj),
                     name,

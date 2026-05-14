@@ -89,7 +89,7 @@ export default function CreateTaskModal({ open, onClose, onTaskCreated }: Create
             onChange={(e) => onWorkflowChange(e.target.value)}>
             {!workflowOptions.length && !workflowsLoading && <option value="">暂无工作流</option>}
             {workflowOptions.map((w) => (
-              <option key={`${w.key}@${w.revision}`} value={w.key}>{w.key} (rev {w.revision})</option>
+              <option key={w.key} value={w.key}>{w.key}</option>
             ))}
           </select>
           {inputFields && inputFields.length > 0 && (

@@ -94,11 +94,11 @@ Body JSON 建议：
 
 ```json
 [
-  { "key": "demo_pipeline", "revision": "1" }
+  { "key": "demo_pipeline" }
 ]
 ```
 
-**一期**返回 `key` + `revision` + 可选 `input_schema`。当 `input_schema` 存在且是简单 object schema 时，UI 可据此渲染字段表单；否则使用 raw JSON 输入。
+**一期**返回 `key` + 可选 `input_schema`。当 `input_schema` 存在且是简单 object schema 时，UI 可据此渲染字段表单；否则使用 raw JSON 输入。
 
 ---
 

@@ -19,7 +19,6 @@ class NodeSpec:
 @dataclass
 class Workflow:
     key: str
-    revision: str = "1"
     nodes: list[NodeSpec] = field(default_factory=list)
     #: JSON Schema ``type: object`` describing ``input`` keys for control-plane forms (optional).
     input_schema: dict[str, Any] | None = None

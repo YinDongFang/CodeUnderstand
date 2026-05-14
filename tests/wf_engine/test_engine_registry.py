@@ -19,7 +19,7 @@ def test_duplicate_workflow_key_rejected():
 
 def test_engine_lists_registered_workflows():
     eng = Engine()
-    wf = Workflow(key="a", revision="2")
+    wf = Workflow(key="a")
 
     def n(ctx):
         pass
@@ -27,5 +27,5 @@ def test_engine_lists_registered_workflows():
     wf.add_node("x", n)
     eng.register_workflow(wf)
     assert eng.list_workflows() == [
-        {"key": "a", "revision": "2", "input_schema": None},
+        {"key": "a", "input_schema": None},
     ]

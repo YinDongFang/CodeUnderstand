@@ -37,7 +37,6 @@ def test_interrupt_then_resolve_completes_node():
         layout.zips.mkdir(parents=True)
         tid = store.create_task(
             workflow_key="w1",
-            workflow_revision="1",
             input_obj={},
             tasks_root=str(Path(td) / "tasks"),
         )

@@ -23,7 +23,6 @@ def test_supervisor_spawns_worker_and_task_succeeds() -> None:
         tasks_root = td_path / "tasks"
         task_id = store.create_task(
             workflow_key="supervisor_spawn_wf",
-            workflow_revision="1",
             input_obj={},
             tasks_root=str(tasks_root),
         )

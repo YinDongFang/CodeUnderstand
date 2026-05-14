@@ -38,7 +38,6 @@ def test_three_nodes_linear_success():
         layout.zips.mkdir(parents=True)
         tid = store.create_task(
             workflow_key="w1",
-            workflow_revision="1",
             input_obj={},
             tasks_root=str(Path(td) / "tasks"),
         )
@@ -70,7 +69,6 @@ def test_whitelist_miss_marks_validation_failure():
         layout.zips.mkdir(parents=True)
         tid = store.create_task(
             workflow_key="w2",
-            workflow_revision="1",
             input_obj={},
             tasks_root=str(Path(td) / "tasks"),
         )

@@ -12,7 +12,7 @@
 from wf_engine import Engine, Workflow
 
 def register_all(engine: Engine) -> None:
-    wf = Workflow(key="demo", revision="1")
+    wf = Workflow(key="demo")
     # wf.add_node("step1", fn, workdir=".", whitelist=("*.txt",))
     engine.register_workflow(wf)
 
@@ -121,4 +121,4 @@ Vite 开发时将 `/api` 代理到本地控制面（例如 `http://127.0.0.1:800
 
 ### `GET /workflows`
 
-返回已注册工作流列表，JSON 数组，每项为 `{"key": "<workflow_key>", "revision": "<revision>"}`，供创建任务时下拉选择。
+返回已注册工作流列表，JSON 数组，每项为 `{"key": "<workflow_key>"}`，供创建任务时下拉选择。

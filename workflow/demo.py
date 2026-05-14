@@ -15,7 +15,6 @@ log = logging.getLogger(__name__)
 def register_all(engine: Engine) -> None:
     wf = Workflow(
         key="demo_pipeline",
-        revision="1",
         input_schema={
             "type": "object",
             "properties": {

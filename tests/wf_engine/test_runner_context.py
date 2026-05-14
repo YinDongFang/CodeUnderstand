@@ -33,7 +33,6 @@ def test_runner_persists_context_on_business_failure(tmp_path: Path) -> None:
     layout.zips.mkdir(parents=True)
     tid = store.create_task(
         workflow_key="wf_ctx_fail",
-        workflow_revision="1",
         input_obj={"seed": 1},
         context_obj={"initial": True},
         tasks_root=str(tmp_path / "tasks"),
@@ -77,7 +76,6 @@ def test_settings_injected_from_store(tmp_path: Path) -> None:
     layout.zips.mkdir(parents=True)
     tid = store.create_task(
         workflow_key="wf_ops",
-        workflow_revision="1",
         input_obj={},
         tasks_root=str(tmp_path / "tasks"),
     )
@@ -110,7 +108,6 @@ def test_interrupt_saves_context_before_waiting_human(tmp_path: Path) -> None:
     layout.zips.mkdir(parents=True)
     tid = store.create_task(
         workflow_key="wf_ctx_int",
-        workflow_revision="1",
         input_obj={},
         context_obj={"base": 0},
         tasks_root=str(tmp_path / "tasks"),

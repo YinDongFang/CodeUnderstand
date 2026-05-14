@@ -35,7 +35,7 @@ export default function TaskDetail({
         <dt>Id</dt>
         <dd className="mono">{detail.id}</dd>
         <dt>Workflow</dt>
-        <dd>{detail.workflow_key} <span className="muted">rev {detail.workflow_revision}</span></dd>
+        <dd>{detail.workflow_key}</dd>
         <dt>Status</dt>
         <dd><span className={chipClass(detail.status)}>{detail.status}</span></dd>
         <dt>Created at</dt>

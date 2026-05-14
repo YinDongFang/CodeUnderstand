@@ -28,7 +28,6 @@ def test_run_once_appends_run_begin_with_execution_round(tmp_path: Path) -> None
 
     tid = store.create_task(
         workflow_key="log_wf",
-        workflow_revision="1",
         input_obj={},
         tasks_root=str(tmp_path / "runs"),
     )
