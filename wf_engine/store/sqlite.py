@@ -12,6 +12,7 @@ from wf_engine import status as S
 from wf_engine.lease_util import parse_utc_iso, pid_alive
 
 OPS_GLOBALS_KEY = "ops_globals"
+SYSTEM_CONFIG_KEY = "system_config"
 
 
 def _utc_iso() -> str:
@@ -170,6 +171,36 @@ class SqliteStore:
                 """INSERT INTO settings (key, value_json) VALUES (?, ?)
                    ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json""",
                 (OPS_GLOBALS_KEY, payload),
+            )
+
+    @staticmethod
+    def _empty_system_config() -> dict[str, str]:
+        return {"tasks_root": ""}
+
+    def get_system_config(self) -> dict[str, str]:
+        empty = self._empty_system_config()
+        with self.connect() as c:
+            row = c.execute(
+                "SELECT value_json FROM settings WHERE key=?",
+                (SYSTEM_CONFIG_KEY,),
+            ).fetchone()
+        if row is None:
+            return dict(empty)
+        try:
+            raw = _loads(row["value_json"])
+        except json.JSONDecodeError:
+            return dict(empty)
+        if not isinstance(raw, dict):
+            return dict(empty)
+        return {"tasks_root": str(raw.get("tasks_root") or "")}
+
+    def set_system_config(self, *, tasks_root: str) -> None:
+        payload = _dumps({"tasks_root": tasks_root})
+        with self.connect() as c:
+            c.execute(
+                """INSERT INTO settings (key, value_json) VALUES (?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json""",
+                (SYSTEM_CONFIG_KEY, payload),
             )
 
     def create_task(

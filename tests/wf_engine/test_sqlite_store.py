@@ -205,6 +205,17 @@ def test_ops_globals_default_empty(tmp_path: Path) -> None:
     assert store.get_ops_globals() == {"cookie": "", "authorization": ""}
 
 
+def test_system_config_default_and_roundtrip(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    assert store.get_system_config() == {"tasks_root": ""}
+    store.set_system_config(tasks_root="/tmp/x")
+    assert store.get_system_config() == {"tasks_root": "/tmp/x"}
+    store.set_system_config(tasks_root="")
+    assert store.get_system_config() == {"tasks_root": ""}
+
+
 def test_ops_globals_roundtrip(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)

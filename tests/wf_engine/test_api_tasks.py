@@ -84,6 +84,24 @@ def test_post_tasks_returns_201_and_get_shows_succeeded_nodes(api_setup):
     asyncio.run(_run())
 
 
+def test_post_tasks_uses_configured_tasks_root(api_setup):
+    app = api_setup["app"]
+    custom_root = api_setup["tasks_root"].parent / "from_settings"
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r0 = await client.put("/settings/system", json={"tasks_root": str(custom_root)})
+            assert r0.status_code == 200
+            r = await client.post("/tasks", json={"workflow_key": "api_wf", "input": {}})
+            assert r.status_code == 201
+            task_id = r.json()["task_id"]
+            tr = custom_root.resolve() / task_id
+            assert (task_layout(tr).workspace / "out.txt").read_text(encoding="utf-8") == "x"
+
+    asyncio.run(_run())
+
+
 def test_post_tasks_duplicate_name_returns_409(api_setup):
     app = api_setup["app"]
 

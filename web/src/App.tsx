@@ -1,14 +1,15 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   createTask,
+  fetchAllSettings,
   fetchLogs,
-  fetchOpsSettings,
   fetchTask,
   fetchTasks,
   fetchWorkflows,
   resolveInterrupt,
   rerunTask,
   saveOpsSettings,
+  saveSystemSettings,
   type TaskDetail,
   type TaskNode,
   type TaskSummary,
@@ -270,7 +271,7 @@ export default function App() {
   const [nowTick, setNowTick] = useState(() => Date.now())
 
   const [modalOpen, setModalOpen] = useState(false)
-  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+  const [rightPanelTab, setRightPanelTab] = useState<'detail' | 'settings'>('detail')
   const [workflowsLoading, setWorkflowsLoading] = useState(false)
   const [workflowsErr, setWorkflowsErr] = useState<string | null>(null)
   const [workflowOptions, setWorkflowOptions] = useState<WorkflowInfo[]>([])
@@ -284,6 +285,9 @@ export default function App() {
 
   const [opsCookieDraft, setOpsCookieDraft] = useState('')
   const [opsAuthDraft, setOpsAuthDraft] = useState('')
+  const [tasksRootDraft, setTasksRootDraft] = useState('')
+  const [serverTasksRootDefault, setServerTasksRootDefault] = useState('')
+  const [tasksRootEffective, setTasksRootEffective] = useState('')
   const [settingsLoadErr, setSettingsLoadErr] = useState<string | null>(null)
   const [settingsSaveErr, setSettingsSaveErr] = useState<string | null>(null)
   const [settingsBusy, setSettingsBusy] = useState(false)
@@ -409,16 +413,19 @@ export default function App() {
   }, [modalOpen])
 
   useEffect(() => {
-    if (!settingsModalOpen) return
+    if (rightPanelTab !== 'settings') return
     let cancelled = false
     setSettingsLoadErr(null)
     setSettingsSaveErr(null)
     setSettingsBusy(true)
-    fetchOpsSettings()
-      .then((o) => {
+    fetchAllSettings()
+      .then((bundle) => {
         if (cancelled) return
-        setOpsCookieDraft(o.cookie)
-        setOpsAuthDraft(o.authorization)
+        setOpsCookieDraft(bundle.ops.cookie)
+        setOpsAuthDraft(bundle.ops.authorization)
+        setTasksRootDraft(bundle.system.tasks_root)
+        setServerTasksRootDefault(bundle.system.server_tasks_root_default)
+        setTasksRootEffective(bundle.system.tasks_root_effective)
       })
       .catch((e: Error) => {
         if (!cancelled) setSettingsLoadErr(e.message)
@@ -429,7 +436,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [settingsModalOpen])
+  }, [rightPanelTab])
 
   useEffect(() => {
     if (!modalOpen) return
@@ -512,17 +519,19 @@ export default function App() {
     [detail, selectedId],
   )
 
-  const onSubmitOpsSettings = async () => {
+  const onSaveConsoleSettings = async () => {
     setSettingsSaveErr(null)
     setSettingsBusy(true)
     try {
-      const saved = await saveOpsSettings({
-        cookie: opsCookieDraft,
-        authorization: opsAuthDraft,
-      })
-      setOpsCookieDraft(saved.cookie)
-      setOpsAuthDraft(saved.authorization)
-      setSettingsModalOpen(false)
+      const [opsSaved, sysSaved] = await Promise.all([
+        saveOpsSettings({ cookie: opsCookieDraft, authorization: opsAuthDraft }),
+        saveSystemSettings({ tasks_root: tasksRootDraft }),
+      ])
+      setOpsCookieDraft(opsSaved.cookie)
+      setOpsAuthDraft(opsSaved.authorization)
+      setTasksRootDraft(sysSaved.tasks_root)
+      setServerTasksRootDefault(sysSaved.server_tasks_root_default)
+      setTasksRootEffective(sysSaved.tasks_root_effective)
     } catch (e) {
       setSettingsSaveErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -573,6 +582,7 @@ export default function App() {
       setTasks(rows)
       setTasksErr(null)
       setModalOpen(false)
+      setRightPanelTab('detail')
       setSelectedId(task_id)
     } catch (e) {
       setCreateErr(e instanceof Error ? e.message : String(e))
@@ -590,18 +600,9 @@ export default function App() {
           <aside className="pane left">
             <div className="left-head">
               <h2 className="left-title">任务</h2>
-              <div className="left-head-actions">
-                <button
-                  type="button"
-                  className="ghost-btn btn-sm"
-                  onClick={() => setSettingsModalOpen(true)}
-                >
-                  设置
-                </button>
-                <button type="button" className="primary btn-sm" onClick={openCreateModal}>
-                  新建任务
-                </button>
-              </div>
+              <button type="button" className="primary btn-sm" onClick={openCreateModal}>
+                新建任务
+              </button>
             </div>
             {tasksErr && <p className="err">{tasksErr}</p>}
             <ul className="task-list">
@@ -610,7 +611,10 @@ export default function App() {
                   <button
                     type="button"
                     className={t.id === selectedId ? 'task-row active' : 'task-row'}
-                    onClick={() => setSelectedId(t.id)}
+                    onClick={() => {
+                      setRightPanelTab('detail')
+                      setSelectedId(t.id)
+                    }}
                     title={`${t.workflow_key} · ${t.id} · Run ${t.execution_count ?? 0} · ${formatWallSeconds(t.active_duration_seconds ?? 0)} active (excl. interrupt)`}
                   >
                     <span className="task-row-main">
@@ -628,9 +632,101 @@ export default function App() {
             {!tasks.length && !tasksErr && <p className="muted">暂无任务</p>}
           </aside>
           <main className="pane right">
-            {!selectedId && <p className="muted">Select a task.</p>}
-            {selectedId && detailErr && <p className="err">{detailErr}</p>}
-            {detail && (
+            <div className="right-tabs-bar" role="tablist" aria-label="右栏视图">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightPanelTab === 'detail'}
+                className={rightPanelTab === 'detail' ? 'tab-pill is-active' : 'tab-pill'}
+                onClick={() => setRightPanelTab('detail')}
+              >
+                任务详情
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightPanelTab === 'settings'}
+                className={rightPanelTab === 'settings' ? 'tab-pill is-active' : 'tab-pill'}
+                onClick={() => setRightPanelTab('settings')}
+              >
+                系统设置
+              </button>
+            </div>
+
+            {rightPanelTab === 'settings' ? (
+              <section className="settings-in-pane" aria-label="系统设置">
+                <h2 className="task-detail-title">系统设置</h2>
+                <p className="muted small">
+                  与任务 context 分库；Ops 在每次 <code className="mono">run_once</code> 入口注入{' '}
+                  <code className="mono">NodeContext.ops_globals</code>。任务根目录仅影响
+                  <strong>新建</strong>任务；既有任务仍使用创建时记录在库中的路径。
+                </p>
+                {settingsLoadErr && <p className="err">{settingsLoadErr}</p>}
+
+                <h3 className="section-heading">系统</h3>
+                <p className="muted small mono wrap-break">
+                  服务启动默认 tasks 根：<strong>{serverTasksRootDefault || '—'}</strong>
+                  <br />
+                  当前新建任务生效：<strong>{tasksRootEffective || '—'}</strong>
+                </p>
+                <label className="lbl" htmlFor="sys-tasks-root">
+                  覆盖 tasks 根目录（留空则用启动值；保存时解析并创建目录）
+                </label>
+                <textarea
+                  id="sys-tasks-root"
+                  className="textarea"
+                  rows={2}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder="绝对或相对路径，可留空"
+                  value={tasksRootDraft}
+                  onChange={(e) => setTasksRootDraft(e.target.value)}
+                  disabled={settingsBusy}
+                />
+
+                <h3 className="section-heading">Ops 全局</h3>
+                <label className="lbl" htmlFor="ops-cookie-settings">
+                  Cookie（可多行）
+                </label>
+                <textarea
+                  id="ops-cookie-settings"
+                  className="textarea"
+                  rows={5}
+                  spellCheck={false}
+                  value={opsCookieDraft}
+                  onChange={(e) => setOpsCookieDraft(e.target.value)}
+                  disabled={settingsBusy}
+                />
+                <label className="lbl" htmlFor="ops-auth-settings">
+                  Authorization（可多行）
+                </label>
+                <textarea
+                  id="ops-auth-settings"
+                  className="textarea"
+                  rows={5}
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={opsAuthDraft}
+                  onChange={(e) => setOpsAuthDraft(e.target.value)}
+                  disabled={settingsBusy}
+                />
+                {settingsSaveErr && <p className="err">{settingsSaveErr}</p>}
+                <div className="settings-save-row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={settingsBusy}
+                    onClick={() => void onSaveConsoleSettings()}
+                  >
+                    {settingsBusy ? '保存中…' : '保存全部'}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <>
+                {!selectedId && <p className="muted">请从左侧选择任务。</p>}
+                {selectedId && detailErr && <p className="err">{detailErr}</p>}
+                {detail && (
               <>
                 <h2 className="task-detail-title">{displayTaskName(detail)}</h2>
                 <dl className="meta">
@@ -806,77 +902,12 @@ export default function App() {
                   </div>
                 )}
               </>
+                )}
+              </>
             )}
           </main>
         </div>
       </div>
-
-      {settingsModalOpen && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="全局设置">
-          <div className="modal">
-            <header className="modal-header">
-              <h3>全局 Ops 设置</h3>
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => setSettingsModalOpen(false)}
-              >
-                关闭
-              </button>
-            </header>
-            <div className="modal-body">
-              <p className="muted small">
-                与任务 context 分库存储；每次 <code className="mono">run_once</code> 入口读取并注入{' '}
-                <code className="mono">NodeContext.ops_globals</code>。
-              </p>
-              {settingsLoadErr && <p className="err">{settingsLoadErr}</p>}
-              <label className="lbl" htmlFor="ops-cookie">
-                Cookie（可多行）
-              </label>
-              <textarea
-                id="ops-cookie"
-                className="textarea"
-                rows={5}
-                spellCheck={false}
-                value={opsCookieDraft}
-                onChange={(e) => setOpsCookieDraft(e.target.value)}
-                disabled={settingsBusy}
-              />
-              <label className="lbl" htmlFor="ops-auth">
-                Authorization（可多行）
-              </label>
-              <textarea
-                id="ops-auth"
-                className="textarea"
-                rows={5}
-                spellCheck={false}
-                autoComplete="off"
-                value={opsAuthDraft}
-                onChange={(e) => setOpsAuthDraft(e.target.value)}
-                disabled={settingsBusy}
-              />
-              {settingsSaveErr && <p className="err">{settingsSaveErr}</p>}
-            </div>
-            <footer className="modal-footer">
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => setSettingsModalOpen(false)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled={settingsBusy}
-                onClick={() => void onSubmitOpsSettings()}
-              >
-                {settingsBusy ? '保存中…' : '保存'}
-              </button>
-            </footer>
-          </div>
-        </div>
-      )}
 
       {modalOpen && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="新建任务">

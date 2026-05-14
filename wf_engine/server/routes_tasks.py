@@ -15,6 +15,7 @@ from wf_engine import status as S
 from wf_engine.lease_util import parse_utc_iso, pid_alive
 from wf_engine.paths import task_layout
 from wf_engine.sandbox import resolve_node_workdir
+from wf_engine.server.paths_util import effective_tasks_root
 from wf_engine.server.state import ControlPlaneState
 from wf_engine.task_timing import compute_active_duration_seconds
 from wf_engine.unzip_util import UnsafeArchiveError, extract_zip_safely
@@ -82,7 +83,13 @@ def _clear_workspace_contents(workspace: Path) -> None:
 
 
 def _task_root(cp: ControlPlaneState, task_id: str) -> Path:
-    return cp.tasks_root / task_id
+    row = cp.store.get_task(task_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=_err("not_found", "task not found"),
+        )
+    return Path(row["tasks_root"]) / task_id
 
 
 def _serialize_node(row: dict[str, Any]) -> dict[str, Any]:
@@ -167,6 +174,7 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
         ) from None
 
     raw_name = body.name.strip() or None
+    tasks_base = effective_tasks_root(cp)
     try:
         tid = cp.store.create_task(
             workflow_key=wf.key,
@@ -174,7 +182,7 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
             input_obj=body.input,
             name=raw_name,
             context_obj=body.context,
-            tasks_root=str(cp.tasks_root),
+            tasks_root=str(tasks_base),
         )
     except sqlite3.IntegrityError as e:
         msg = str(e).lower()
@@ -187,7 +195,7 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
                 ),
             ) from e
         raise
-    root = _task_root(cp, tid)
+    root = tasks_base / tid
     layout = task_layout(root)
     layout.workspace.mkdir(parents=True, exist_ok=True)
     layout.zips.mkdir(parents=True, exist_ok=True)

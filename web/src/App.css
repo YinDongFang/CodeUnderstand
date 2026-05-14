@@ -54,6 +54,44 @@
   font-weight: 600;
 }
 
+.right-tabs-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #30363d;
+}
+
+.tab-pill {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.tab-pill:hover {
+  border-color: #58a6ff;
+}
+
+.tab-pill.is-active {
+  background: #238636;
+  border-color: #238636;
+  font-weight: 600;
+}
+
+.settings-in-pane .settings-save-row {
+  margin-top: 1rem;
+}
+
+.wrap-break {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .pane.right {
   flex: 1;
 }

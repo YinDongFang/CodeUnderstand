@@ -85,6 +85,17 @@ export type OpsGlobals = {
   authorization: string
 }
 
+export type SystemSettings = {
+  tasks_root: string
+  server_tasks_root_default: string
+  tasks_root_effective: string
+}
+
+export type ConsoleSettings = {
+  ops: OpsGlobals
+  system: SystemSettings
+}
+
 export function fetchTasks(): Promise<TaskSummary[]> {
   return fetch(`${BASE}/tasks`).then((r) => parseJson<TaskSummary[]>(r))
 }
@@ -106,6 +117,10 @@ export function fetchWorkflows(): Promise<WorkflowInfo[]> {
   return fetch(`${BASE}/workflows`).then((r) => parseJson<WorkflowInfo[]>(r))
 }
 
+export function fetchAllSettings(): Promise<ConsoleSettings> {
+  return fetch(`${BASE}/settings`).then((r) => parseJson<ConsoleSettings>(r))
+}
+
 export function fetchOpsSettings(): Promise<OpsGlobals> {
   return fetch(`${BASE}/settings/ops`).then((r) => parseJson<OpsGlobals>(r))
 }
@@ -116,6 +131,16 @@ export function saveOpsSettings(body: OpsGlobals): Promise<OpsGlobals> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then((r) => parseJson<OpsGlobals>(r))
+}
+
+export function saveSystemSettings(body: {
+  tasks_root: string
+}): Promise<SystemSettings> {
+  return fetch(`${BASE}/settings/system`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => parseJson<SystemSettings>(r))
 }
 
 export function createTask(body: {
