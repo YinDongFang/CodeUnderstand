@@ -12,8 +12,17 @@ from pathlib import Path
 from wf_engine.engine import Engine
 from wf_engine.lease_util import utc_iso_after
 from wf_engine.paths import task_layout
-from wf_engine.runner import run_once
+from wf_engine.runner import run_once, wf_log_node
 from wf_engine.store.sqlite import SqliteStore
+
+
+class _WfNodeLogFilter(logging.Filter):
+    """Populate ``record.wf_node`` from runner context for task.log formatting."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003 — logging.Filter API
+        node = wf_log_node.get()
+        setattr(record, "wf_node", node)
+        return True
 
 
 def _configure_task_file_logging(task_root: Path) -> None:
@@ -21,9 +30,10 @@ def _configure_task_file_logging(task_root: Path) -> None:
     log_dir = task_layout(task_root).logs
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / "task.log"
-    fmt = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    fmt = "%(asctime)s | %(levelname)s | %(wf_node)s | %(name)s | %(message)s"
     datefmt = "%Y-%m-%d %H:%M:%S"
     handler = logging.FileHandler(path, encoding="utf-8")
+    handler.addFilter(_WfNodeLogFilter())
     handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
     root = logging.getLogger()
     root.setLevel(logging.INFO)

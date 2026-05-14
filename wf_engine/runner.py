@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import copy
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from wf_engine.sandbox import resolve_node_workdir
 from wf_engine.store.sqlite import SqliteStore, _utc_iso
 from wf_engine.workflow import Workflow
 from wf_engine.zip_util import WhitelistPackError, pack_whitelist_zip, warn_extraneous_workspace_files
+
+wf_log_node: contextvars.ContextVar[str] = contextvars.ContextVar("wf_log_node", default="")
 
 
 def run_once(
@@ -106,39 +109,43 @@ def run_once(
         )
         injected_human = human_input is not None
 
+        wf_log_node.set(f"[{ordinal}:{spec.id}]")
         try:
-            spec.fn(ctx)
-        except ControlledInterrupt as c:
-            store.save_task_context(task_id, shared_context)
-            store.open_interrupt(
-                task_id,
-                node_id=spec.id,
-                expected_schema=c.expected_schema,
-                ui=c.ui,
-                checkpoint=c.checkpoint,
-            )
-            store.update_node(
-                task_id,
-                ordinal,
-                status=S.NODE_WAITING_HUMAN,
-                clear_finished_at=True,
-            )
-            store.release_lease(task_id)
-            return
-        except Exception as e:
-            store.save_task_context(task_id, shared_context)
-            store.update_node(
-                task_id,
-                ordinal,
-                status=S.NODE_FAILED,
-                finished_at=_utc_iso(),
-                error_json={"category": "business", "message": str(e)},
-            )
-            store.set_task_status(task_id, S.TASK_FAILED)
-            store.release_lease(task_id)
-            return
-        else:
-            store.save_task_context(task_id, shared_context)
+            try:
+                spec.fn(ctx)
+            except ControlledInterrupt as c:
+                store.save_task_context(task_id, shared_context)
+                store.open_interrupt(
+                    task_id,
+                    node_id=spec.id,
+                    expected_schema=c.expected_schema,
+                    ui=c.ui,
+                    checkpoint=c.checkpoint,
+                )
+                store.update_node(
+                    task_id,
+                    ordinal,
+                    status=S.NODE_WAITING_HUMAN,
+                    clear_finished_at=True,
+                )
+                store.release_lease(task_id)
+                return
+            except Exception as e:
+                store.save_task_context(task_id, shared_context)
+                store.update_node(
+                    task_id,
+                    ordinal,
+                    status=S.NODE_FAILED,
+                    finished_at=_utc_iso(),
+                    error_json={"category": "business", "message": str(e)},
+                )
+                store.set_task_status(task_id, S.TASK_FAILED)
+                store.release_lease(task_id)
+                return
+            else:
+                store.save_task_context(task_id, shared_context)
+        finally:
+            wf_log_node.set("")
 
         globs = tuple(spec.whitelist_globs)
         dest_zip = layout.zips / f"{ordinal}_{spec.id}.zip"

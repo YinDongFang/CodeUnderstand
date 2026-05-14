@@ -54,3 +54,5 @@ def test_supervisor_spawns_worker_and_task_succeeds() -> None:
         assert ret == 0
         assert store.get_task(task_id)["status"] == S.TASK_SUCCEEDED
         assert (layout.workspace / "touched.txt").read_text(encoding="utf-8") == "ok"
+        task_log = (layout.logs / "task.log").read_text(encoding="utf-8")
+        assert "[0:n1]" in task_log
