@@ -13,10 +13,28 @@ log = logging.getLogger(__name__)
 
 
 def register_all(engine: Engine) -> None:
-    wf = Workflow(key="demo_pipeline", revision="1")
+    wf = Workflow(
+        key="demo_pipeline",
+        revision="1",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "source_label": {
+                    "type": "string",
+                    "title": "来源标签",
+                },
+                "priority": {
+                    "type": "string",
+                    "title": "优先级说明",
+                },
+            },
+            "required": ["source_label"],
+        },
+    )
 
     def step_fetch(ctx: NodeContext) -> None:
         ctx.context["demo_step"] = "fetch"
+        ctx.context["source_label"] = str(ctx.input.get("source_label", ""))
         log.info("[%s] 拉取输入并写入 out.txt", ctx.node_id)
         (ctx.node_workdir / "out.txt").write_text(
             "demo-seed\nline2\n",

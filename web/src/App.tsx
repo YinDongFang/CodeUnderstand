@@ -9,6 +9,7 @@ import {
   type TaskDetail,
   type TaskNode,
   type TaskSummary,
+  type WorkflowInfo,
 } from './api'
 import './App.css'
 
@@ -68,6 +69,81 @@ function defaultPayloadDraftFromSchema(
     else o[key] = null
   }
   return JSON.stringify(o, null, 2)
+}
+
+type InputFieldSpec = { key: string; required: boolean; type: string; title: string }
+
+function parseInputSchema(schema: unknown): InputFieldSpec[] | null {
+  if (!schema || typeof schema !== 'object') return null
+  const s = schema as Record<string, unknown>
+  if (s.type !== 'object') return null
+  const props = s.properties
+  if (!props || typeof props !== 'object') return null
+  const keys = Object.keys(props as object)
+  if (keys.length === 0) return null
+  const required = new Set(
+    Array.isArray(s.required)
+      ? (s.required as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [],
+  )
+  const po = props as Record<string, Record<string, unknown>>
+  return keys.map((key) => {
+    const p = po[key]
+    const t = typeof p?.type === 'string' ? p.type : 'string'
+    const title = typeof p?.title === 'string' ? p.title : key
+    return { key, required: required.has(key), type: t, title }
+  })
+}
+
+function buildInputFromForm(
+  fields: InputFieldSpec[],
+  values: Record<string, string>,
+): Record<string, unknown> {
+  const o: Record<string, unknown> = {}
+  for (const f of fields) {
+    const raw = values[f.key] ?? ''
+    if (f.type === 'number' || f.type === 'integer') {
+      if (raw.trim() === '') {
+        if (f.required) throw new Error(`请填写：${f.title}`)
+        continue
+      }
+      const n = Number(raw)
+      if (Number.isNaN(n)) throw new Error(`${f.title} 须为数字`)
+      o[f.key] = n
+    } else if (f.type === 'boolean') {
+      o[f.key] = raw === 'true' || raw === '1'
+    } else {
+      if (f.required && !raw.trim()) throw new Error(`请填写：${f.title}`)
+      if (raw !== '' || f.required) o[f.key] = raw
+    }
+  }
+  return o
+}
+
+function hasDictContent(o: Record<string, unknown> | null | undefined): boolean {
+  return o != null && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length > 0
+}
+
+function KvBlock({ title, data }: { title: string; data: Record<string, unknown> }) {
+  return (
+    <>
+      <h3 className="section-heading">{title}</h3>
+      <table className="kv-table">
+        <tbody>
+          {Object.entries(data).map(([k, v]) => (
+            <tr key={k}>
+              <th scope="row" className="mono">
+                {k}
+              </th>
+              <td>
+                <pre className="kv-cell">{stringifyCell(v)}</pre>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  )
 }
 
 function chipClass(status: string): string {
@@ -146,11 +222,10 @@ export default function App() {
   const [modalOpen, setModalOpen] = useState(false)
   const [workflowsLoading, setWorkflowsLoading] = useState(false)
   const [workflowsErr, setWorkflowsErr] = useState<string | null>(null)
-  const [workflowOptions, setWorkflowOptions] = useState<{ key: string; revision: string }[]>([])
+  const [workflowOptions, setWorkflowOptions] = useState<WorkflowInfo[]>([])
   const [newTaskName, setNewTaskName] = useState('')
   const [newWorkflowKey, setNewWorkflowKey] = useState('')
-  const [newInputJson, setNewInputJson] = useState('{}')
-  const [newContextJson, setNewContextJson] = useState('{}')
+  const [inputForm, setInputForm] = useState<Record<string, string>>({})
   const [createErr, setCreateErr] = useState<string | null>(null)
   const [createBusy, setCreateBusy] = useState(false)
 
@@ -271,6 +346,21 @@ export default function App() {
   }, [modalOpen])
 
   useEffect(() => {
+    if (!modalOpen) return
+    const wf = workflowOptions.find((w) => w.key === newWorkflowKey)
+    const fields = parseInputSchema(wf?.input_schema ?? null)
+    if (!fields) {
+      setInputForm({})
+      return
+    }
+    const next: Record<string, string> = {}
+    for (const f of fields) {
+      next[f.key] = f.type === 'boolean' ? 'false' : ''
+    }
+    setInputForm(next)
+  }, [modalOpen, newWorkflowKey, workflowOptions])
+
+  useEffect(() => {
     if (detail?.interrupt) {
       setResolveDraft(defaultPayloadDraftFromSchema(detail.interrupt.expected_schema))
       setResolveErr(null)
@@ -306,29 +396,14 @@ export default function App() {
     }
   }, [detail?.interrupt, resolveDraft, selectedId])
 
-  const parseJsonObject = (
-    raw: string,
-    label: string,
-  ): Record<string, unknown> | null => {
-    try {
-      const v = JSON.parse(raw || '{}') as unknown
-      if (v === null || typeof v !== 'object' || Array.isArray(v)) {
-        setCreateErr(`${label} 须为 JSON object`)
-        return null
-      }
-      return v as Record<string, unknown>
-    } catch (e) {
-      setCreateErr(`${label}: ${e instanceof Error ? e.message : '无效的 JSON'}`)
-      return null
-    }
-  }
+  const selectedWorkflow = workflowOptions.find((w) => w.key === newWorkflowKey)
+  const inputFields = parseInputSchema(selectedWorkflow?.input_schema ?? null)
 
   const openCreateModal = () => {
     setCreateErr(null)
     setNewTaskName('')
     setNewWorkflowKey('')
-    setNewInputJson('{}')
-    setNewContextJson('{}')
+    setInputForm({})
     setModalOpen(true)
   }
 
@@ -343,10 +418,15 @@ export default function App() {
       return
     }
     setCreateErr(null)
-    const input = parseJsonObject(newInputJson, 'Input')
-    if (!input) return
-    const context = parseJsonObject(newContextJson, 'Context')
-    if (!context) return
+    let input: Record<string, unknown> = {}
+    if (inputFields && inputFields.length > 0) {
+      try {
+        input = buildInputFromForm(inputFields, inputForm)
+      } catch (e) {
+        setCreateErr(e instanceof Error ? e.message : String(e))
+        return
+      }
+    }
 
     setCreateBusy(true)
     try {
@@ -354,7 +434,6 @@ export default function App() {
         workflow_key: newWorkflowKey,
         name: nameTrim,
         input,
-        context,
       })
       const rows = await fetchTasks()
       setTasks(rows)
@@ -419,27 +498,10 @@ export default function App() {
                   </dd>
                 </dl>
 
-                <h3 className="section-heading">输入 (input)</h3>
-                <pre className="json">{JSON.stringify(detail.input, null, 2)}</pre>
+                {hasDictContent(detail.input) && <KvBlock title="输入 (input)" data={detail.input} />}
 
-                <h3 className="section-heading">上下文 (context)</h3>
-                {Object.keys(detail.context ?? {}).length === 0 ? (
-                  <p className="muted">—</p>
-                ) : (
-                  <table className="kv-table">
-                    <tbody>
-                      {Object.entries(detail.context ?? {}).map(([k, v]) => (
-                        <tr key={k}>
-                          <th scope="row" className="mono">
-                            {k}
-                          </th>
-                          <td>
-                            <pre className="kv-cell">{stringifyCell(v)}</pre>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {hasDictContent(detail.context) && (
+                  <KvBlock title="上下文 (context)" data={detail.context} />
                 )}
 
                 <h3 className="section-heading">节点（顺序）</h3>
@@ -510,16 +572,16 @@ export default function App() {
 
                 <h3 className="section-heading">Logs</h3>
                 {logsErr && <p className="err">{logsErr}</p>}
-                {!logLines.length && !logsErr && <pre className="logs">—</pre>}
+                {!logLines.length && !logsErr && <pre className="logs logs-empty">—</pre>}
                 {logLines.length > 0 && (
-                  <div className="log-sections">
+                  <div className="log-panel">
                     {logGroups.map((g, i) => (
-                      <details key={`${g.title}-${i}`} className="log-detail">
+                      <details key={`${g.title}-${i}`} className="log-block">
                         <summary className="log-summary">
                           <span className="log-summary-label">{g.title}</span>
                           <span className="muted log-summary-meta">{g.lines.length} 行</span>
                         </summary>
-                        <pre className="logs logs-nested">{g.lines.join('\n')}</pre>
+                        <pre className="log-block-body">{g.lines.join('\n')}</pre>
                       </details>
                     ))}
                   </div>
@@ -572,28 +634,46 @@ export default function App() {
                   </option>
                 ))}
               </select>
-              <label className="lbl" htmlFor="nt-input-json">
-                Input JSON
-              </label>
-              <textarea
-                id="nt-input-json"
-                className="textarea"
-                rows={5}
-                spellCheck={false}
-                value={newInputJson}
-                onChange={(e) => setNewInputJson(e.target.value)}
-              />
-              <label className="lbl" htmlFor="nt-context-json">
-                Context JSON
-              </label>
-              <textarea
-                id="nt-context-json"
-                className="textarea"
-                rows={5}
-                spellCheck={false}
-                value={newContextJson}
-                onChange={(e) => setNewContextJson(e.target.value)}
-              />
+              {inputFields && inputFields.length > 0 && (
+                <div className="modal-input-fields">
+                  <p className="lbl strong">工作流参数 (input)</p>
+                  {inputFields.map((f) => (
+                    <div key={f.key} className="field-row">
+                      <label className="lbl" htmlFor={`nt-in-${f.key}`}>
+                        {f.title}
+                        {f.required ? <span className="req-mark"> *</span> : null}
+                      </label>
+                      {f.type === 'boolean' ? (
+                        <label className="check-row">
+                          <input
+                            id={`nt-in-${f.key}`}
+                            type="checkbox"
+                            checked={inputForm[f.key] === 'true'}
+                            onChange={(e) =>
+                              setInputForm((prev) => ({
+                                ...prev,
+                                [f.key]: e.target.checked ? 'true' : 'false',
+                              }))
+                            }
+                          />
+                          <span className="muted small">是 / 否</span>
+                        </label>
+                      ) : (
+                        <input
+                          id={`nt-in-${f.key}`}
+                          type={f.type === 'number' || f.type === 'integer' ? 'number' : 'text'}
+                          className="input-text"
+                          value={inputForm[f.key] ?? ''}
+                          onChange={(e) =>
+                            setInputForm((prev) => ({ ...prev, [f.key]: e.target.value }))
+                          }
+                          autoComplete="off"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               {createErr && <p className="err">{createErr}</p>}
             </div>
             <footer className="modal-footer">

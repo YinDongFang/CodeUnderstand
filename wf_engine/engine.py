@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from wf_engine.workflow import Workflow
 
@@ -18,9 +19,16 @@ class Engine:
     def get_workflow(self, key: str) -> Workflow:
         return self._workflows[key]
 
-    def list_workflows(self) -> list[dict[str, str]]:
+    def list_workflows(self) -> list[dict[str, Any]]:
         wfs = sorted(self._workflows.values(), key=lambda wf: wf.key)
-        return [{"key": wf.key, "revision": wf.revision} for wf in wfs]
+        return [
+            {
+                "key": wf.key,
+                "revision": wf.revision,
+                "input_schema": wf.input_schema,
+            }
+            for wf in wfs
+        ]
 
     def serve(
         self,

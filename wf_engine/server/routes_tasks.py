@@ -186,7 +186,7 @@ def list_tasks(request: Request) -> list[dict[str, Any]]:
 
 
 @router.get("/workflows")
-def list_workflows(request: Request) -> list[dict[str, str]]:
+def list_workflows(request: Request) -> list[dict[str, Any]]:
     cp = _cp(request)
     return cp.engine.list_workflows()
 

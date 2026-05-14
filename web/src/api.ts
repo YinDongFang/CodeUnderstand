@@ -65,6 +65,12 @@ export type TaskDetail = {
   interrupt?: InterruptInfo
 }
 
+export type WorkflowInfo = {
+  key: string
+  revision: string
+  input_schema?: Record<string, unknown> | null
+}
+
 export type LogsResponse = {
   lines: string[]
   next_cursor: number
@@ -87,20 +93,19 @@ export function fetchLogs(taskId: string, cursor: number): Promise<LogsResponse>
   )
 }
 
-export function fetchWorkflows(): Promise<{ key: string; revision: string }[]> {
-  return fetch(`${BASE}/workflows`).then((r) => parseJson<{ key: string; revision: string }[]>(r))
+export function fetchWorkflows(): Promise<WorkflowInfo[]> {
+  return fetch(`${BASE}/workflows`).then((r) => parseJson<WorkflowInfo[]>(r))
 }
 
 export function createTask(body: {
   workflow_key: string
   name: string
   input: Record<string, unknown>
-  context: Record<string, unknown>
 }): Promise<{ task_id: string }> {
   return fetch(`${BASE}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, context: {} }),
   }).then((r) => parseJson<{ task_id: string }>(r))
 }
 

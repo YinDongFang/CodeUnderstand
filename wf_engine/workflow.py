@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from wf_engine.context import NodeContext
 
@@ -19,6 +20,8 @@ class Workflow:
     key: str
     revision: str = "1"
     nodes: list[NodeSpec] = field(default_factory=list)
+    #: JSON Schema ``type: object`` describing ``input`` keys for control-plane forms (optional).
+    input_schema: dict[str, Any] | None = None
 
     def add_node(
         self,

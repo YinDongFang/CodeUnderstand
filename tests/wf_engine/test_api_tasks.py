@@ -143,7 +143,7 @@ def test_get_workflows_lists_registered(api_setup):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             r = await client.get("/workflows")
             assert r.status_code == 200
-            assert r.json() == [{"key": "api_wf", "revision": "1"}]
+            assert r.json() == [{"key": "api_wf", "revision": "1", "input_schema": None}]
 
     asyncio.run(_run())
 
