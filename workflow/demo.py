@@ -16,6 +16,7 @@ def register_all(engine: Engine) -> None:
     wf = Workflow(key="demo_pipeline", revision="1")
 
     def step_fetch(ctx: NodeContext) -> None:
+        ctx.context["demo_step"] = "fetch"
         log.info("[%s] 拉取输入并写入 out.txt", ctx.node_id)
         (ctx.node_workdir / "out.txt").write_text(
             "demo-seed\nline2\n",

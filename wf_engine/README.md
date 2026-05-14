@@ -89,3 +89,36 @@ cd web && npm run dev
 ```
 
 Vite 开发时将 `/api` 代理到本地控制面（例如 `http://127.0.0.1:8000`），便于联调任务列表、详情与 interrupt 解析界面。
+
+## HTTP 控制面：任务与工作流
+
+以下为与 Web UI 联调常用的 JSON 字段（路径相对控制面根，例如 `http://127.0.0.1:8000`）。
+
+### `POST /tasks`（201）
+
+创建任务并启动 worker。请求体（JSON）主要字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `workflow_key` | string | **必填**，须在控制进程 `Engine` 中已注册。 |
+| `name` | string | 可选；若为空或仅空白，存库为「未命名」（`null`），前端可展示默认标题。 |
+| `input` | object | 可选，默认 `{}`；任务级只读快照，节点通过 `NodeContext.input` 读取。 |
+| `context` | object | 可选，默认 `{}`；可变上下文，节点可写 `ctx.context[...]`，runner 在节点结束后持久化（详见设计与 runner 行为）。 |
+
+响应：`{"task_id": "<uuid>"}`。
+
+### `GET /tasks/{task_id}`
+
+任务详情。除 `id`、`status`、`workflow_key`、`nodes` 等外，还包括：
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 创建时传入的名称，可能为 `null`。 |
+| `input` | 创建时的 `input` 快照（object）。 |
+| `context` | 当前持久化后的可变上下文（object），随节点执行更新。 |
+
+若任务处于人工闸门，响应中可能含 `interrupt` 等扩展字段（与现实现一致）。
+
+### `GET /workflows`
+
+返回已注册工作流列表，JSON 数组，每项为 `{"key": "<workflow_key>", "revision": "<revision>"}`，供创建任务时下拉选择。
