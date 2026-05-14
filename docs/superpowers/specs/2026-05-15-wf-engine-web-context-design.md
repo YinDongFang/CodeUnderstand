@@ -1,8 +1,9 @@
 # wf_engine Web UI 与任务上下文（input / context）设计
 
-**状态：** 草案（已对齐产品方向，待实现计划）  
+**状态：** **定稿**（2026-05-15）  
+**实现计划：** `docs/superpowers/plans/2026-05-15-wf-engine-web-context.md`  
 **前置：** `docs/superpowers/specs/2026-05-14-workflow-orchestration-engine-design.md`、当前 e2e 已通过  
-**关联实现：** 后续 `writing-plans` 拆 Task；本稿不写死文件名。
+**关联实现：** 按计划 Task 执行；本稿不写死代码路径以外的强制文件名。
 
 ---
 
