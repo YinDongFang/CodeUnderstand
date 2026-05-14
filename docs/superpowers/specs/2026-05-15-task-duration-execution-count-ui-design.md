@@ -9,7 +9,7 @@
 ## 1. 目标
 
 1. **任务总用时（排除 interrupt）**：在 **列表** 与 **详情** 展示「活跃墙钟秒数」——即自创建起至「当前时刻或任务终态的 `updated_at`」之间，**扣除** 所有处于 `waiting_human` 的区间（含当前尚未 resolve 的半段）。
-2. **任务执行次数**：创建并成功调度 **首次** worker 后基线为 **1**；每出现一次 **新的 worker 执行轮次** 再 **+1**：具体在 **`prepare_task_for_rerun_execution`（POST `/tasks/{id}/rerun`）** 与 **`apply_resolve`（interrupt resolve）** 各 **+1**（与「resolve 后再次拉起 worker」语义一致）。
+2. **任务执行轮次**：创建并成功调度首次自动执行后基线为 **1**；每次用户手动 `rerun` 再 **+1**。同一个 worker 内从一个节点自动推进到下一个节点不算新轮次；`waiting_human` resolve 后继续运行也不算新轮次，即使内部会启动新的 worker 世代。
 3. **详情页文案**：右侧 **详情列** 内 **标题与标签一律英文**（`h2`/`h3`、`meta` 的 `dt`、区块标题、该区域按钮与 `title`）。左侧任务列表顶栏、新建任务 **模态框** 维持 **中文**（除非后续全站英文化需求）。
 
 ---
@@ -18,7 +18,7 @@
 
 | 列 | 类型 | 说明 |
 |----|------|------|
-| `execution_count` | `INTEGER NOT NULL DEFAULT 0` | 执行次数（见 §2.1）；新建任务在首次调度 worker 后置为 `1`。 |
+| `execution_count` | `INTEGER NOT NULL DEFAULT 0` | 用户可见执行轮次（见 §2.1）；新建任务在首次调度 worker 后置为 `1`。 |
 | `interrupt_wall_seconds_accumulated` | `INTEGER NOT NULL DEFAULT 0` | 已 **完结** 的 `waiting_human` 区间墙钟秒数之和（仅在 `apply_resolve` 时累加）。 |
 | `waiting_human_since` | `TEXT NULL` | 进入当前「待人」区间的 UTC ISO 起点；非 `waiting_human` 时为 `NULL`。 |
 
@@ -26,9 +26,9 @@
 
 - **`create_task` 路径**：在现有逻辑完成「初始化任务目录 + 节点行 + 置为 running + spawn 首次 worker」之后，将 **`execution_count` 设为 `1`**（表示已计一次自动运行）。
 - **`prepare_task_for_rerun_execution`**：`execution_count += 1`。
-- **`apply_resolve`**：`execution_count += 1`。
+- **`apply_resolve`**：不改变 `execution_count`；resolve 只是继续当前轮次。
 
-不在 **`worker_generation` 自增的所有其它位置** 重复 +1，除非将来产品定义扩展。
+不在 **`worker_generation` 自增的其它位置** 重复 +1。`worker_generation` 是内部 worker 世代；`execution_count` 是用户可见轮次。
 
 ### 2.2 Interrupt 时长累积
 
@@ -90,8 +90,8 @@ active_duration_seconds = max(0,
 
 | 区域 | 内容 |
 |------|------|
-| 左侧列表行 | 展示 **Active duration**（或短标签 + 格式化时长）与 **Run count** / `execution_count`；版式由实现定（副行或 `title` 提示）。 |
-| 右侧详情 meta | 增加 **`Execution count`**、**`Active duration`**（排除 interrupt）；**本节及详情内全部标题/标签英文**。 |
+| 左侧列表行 | 展示 **Active duration**（或短标签 + 格式化时长）与 **Execution round** / `execution_count`；版式由实现定（副行或 `title` 提示）。 |
+| 右侧详情 meta | 增加 **`Execution round`**、**`Active duration`**（排除 interrupt）；**本节及详情内全部标题/标签英文**。 |
 | 详情列 | 现有中文标题（如「创建时间」「节点」「日志」等）改为英文对应项。 |
 | 模态框 / 左栏 | **保持中文**。 |
 
@@ -102,7 +102,7 @@ active_duration_seconds = max(0,
 ## 6. 测试要点（实现计划落地）
 
 - 迁移：`ALTER` 新列 + 存量 **`execution_count`** 回填策略（建议：存量无精确历史时设为 **至少 1** 若任务曾运行，否则 **0**——具体由实现选保守方案并文档化）。
-- `create_task` 后 `execution_count == 1`；一次 **rerun**、一次 **resolve** 各 +1（与路径顺序无关的独立用例）。
+- `create_task` 后 `execution_count == 1`；一次 **rerun** 后 +1；一次 **resolve** 后不变。
 - `waiting_human` 停留 N 秒后 resolve：`active_duration_seconds` 比粗算墙钟少约 N；终态任务用 `updated_at` 作 `end`。
 - API 集成测试：列表与详情均含新字段。
 - UI：详情标题英文快照或轻量 e2e（可选）。
@@ -112,5 +112,5 @@ active_duration_seconds = max(0,
 ## 7. 规格自检（2026-05-15）
 
 - 无 **TBD** 占位；执行次数与 interrupt 扣除口径已单一释义。
-- 与既有 **`worker_generation`** 解耦：本规格不修改其语义，仅并行维护 **`execution_count`**。
+- 与既有 **`worker_generation`** 解耦：本规格不修改其语义，仅并行维护用户可见 **`execution_count`**。
 - 范围限于：**SQLite 迁移**、**store/routes**、**Web 详情英文化 + 列表摘要**；不扩展事件表。

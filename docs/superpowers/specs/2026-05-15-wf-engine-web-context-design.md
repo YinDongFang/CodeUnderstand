@@ -12,7 +12,7 @@
 在**不削弱**现有编排、interrupt、rerun、租约与安全策略的前提下，增强 **Web 控制台** 与 **任务数据模型**：
 
 1. 去掉 Web **topbar**，全屏左右布局。  
-2. **创建任务**：按钮 + **模态框**——可选已注册 **workflow**、填写 **task name**、**input**（初始参数）、**context** 初始（可选）。若 workflow 提供 `input_schema`，UI 可优先渲染字段表单；同时保留 raw JSON 入口，避免没有 schema 时无法传参。  
+2. **创建任务**：按钮 + **模态框**——可选已注册 **workflow**、填写 **task name**，并仅展示 `input_schema` 解析出的参数表单。UI 不提供 raw JSON 输入，不提供 context 输入；无 schema 时以空 input 创建。  
 3. 左侧列表：**主展示 task name**；不展示 workflow 名（workflow 仍可仅在详情或排障区出现）。  
 4. 右侧任务元信息：**展示 name**；**input** 与 **context** 分区展示（context 风格接近「环境变量」只读键值 / JSON）。  
 5. **双对象模型（已定）：**  
@@ -106,7 +106,7 @@ Body JSON 建议：
 
 **目标：** 右侧日志区可按 **节点** 折叠/展开，不显式依赖图布局算法。
 
-**推荐一期：** 保持单机 `task.log`（或等价单文件），由 worker/runner 为每条日志行注入 **可解析的节点作用域**（例如 logger `name` 或统一前缀 `node={ordinal}:{node_id}`），`GET /tasks/{id}/logs` 可：
+**推荐一期：** 保持单机 `task.log`（或等价单文件），由 worker/runner 写入每轮次起始 marker，并为每条日志行注入 **可解析的节点作用域**（例如 logger `name` 或统一前缀 `node={ordinal}:{node_id}`）。UI 顶层按用户可见轮次显示 `Run i/n`，每个 Run 内再按节点分组展示日志。`waiting_human` resolve 后继续运行仍归入同一个 Run，不因内部 worker 世代变化产生新的用户可见 Run。`GET /tasks/{id}/logs` 可：
 
 - **A**：仍返回平面 `lines[]`，由 **前端** 按前缀分组渲染折叠块；或  
 - **B**：增加可选查询参数返回结构化分段（实现阶段二选一，本规格不锁定）。
@@ -120,7 +120,7 @@ Body JSON 建议：
 | 项 | 要求 |
 |----|------|
 | 布局 | 无 topbar；左列表 + 右详情 |
-| 创建 | 主按钮打开模态：`name`、workflow 下拉（`GET /workflows`）、`input`（schema 字段表单 + raw JSON fallback）、`context` JSON（可默认 `{}`） |
+| 创建 | 主按钮打开模态：`name`、workflow 下拉（`GET /workflows`）、`input_schema` 参数表单；不展示 raw JSON，不展示 context |
 | 左栏 | 显示 **task name**；`name` 缺省时可用 `id` 短前缀 + 「未命名」等 fallback |
 | 右栏元信息 | **name** 置顶或置于任务标题区；**input** / **context** 分块；context 表格化或语法高亮 JSON |
 | 日志 | 按节点分段 UI，支持折叠/展开 |
@@ -139,7 +139,7 @@ Body JSON 建议：
 
 - **API：** `POST /tasks` 带 `name` / `input` / `context`；`GET` 详情可见且 `input` 不被后续节点改写；重复非空 `name` 返回 409。  
 - **Runner：** 节点内修改 `context` 后，在 **失败**、**interrupt**、**success** 三种出口下，`GET` 均能看到预期 `context`（与 §3 一致）。  
-- **UI：** 创建模态可用；列表只见 name；详情见 name + context；日志可折叠（与 §5 选定方案一致）。
+- **UI：** 创建模态可用；列表只见 name；创建时只展示 schema 参数；详情可见 name + context；日志可折叠（与 §5 选定方案一致）。
 
 ---
 
