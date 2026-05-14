@@ -68,6 +68,9 @@ def test_post_tasks_returns_201_and_get_shows_succeeded_nodes(api_setup):
             assert r2.status_code == 200
             body = r2.json()
             assert body["status"] == S.TASK_SUCCEEDED
+            assert body["name"] is None
+            assert body["input"] == {}
+            assert body["context"] == {}
             assert len(body["nodes"]) == 1
             assert body["nodes"][0]["node_id"] == "step1"
             assert body["nodes"][0]["status"] == S.NODE_SUCCESS
@@ -95,7 +98,52 @@ def test_list_tasks_returns_summary(api_setup):
             assert rows[0]["id"] == task_id
             assert rows[0]["workflow_key"] == "api_wf"
             assert rows[0]["status"] == S.TASK_SUCCEEDED
+            assert rows[0]["name"] is None
             assert "created_at" in rows[0]
+
+    asyncio.run(_run())
+
+
+def test_post_tasks_with_name_and_context_roundtrip(api_setup):
+    app = api_setup["app"]
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.post(
+                "/tasks",
+                json={
+                    "workflow_key": "api_wf",
+                    "name": "  my job  ",
+                    "input": {"a": 1},
+                    "context": {"env": "test"},
+                },
+            )
+            assert r.status_code == 201
+            task_id = r.json()["task_id"]
+
+            detail = await client.get(f"/tasks/{task_id}")
+            assert detail.status_code == 200
+            body = detail.json()
+            assert body["name"] == "my job"
+            assert body["input"] == {"a": 1}
+            assert body["context"] == {"env": "test"}
+
+            listed = await client.get("/tasks")
+            assert listed.json()[0]["name"] == "my job"
+
+    asyncio.run(_run())
+
+
+def test_get_workflows_lists_registered(api_setup):
+    app = api_setup["app"]
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get("/workflows")
+            assert r.status_code == 200
+            assert r.json() == [{"key": "api_wf", "revision": "1"}]
 
     asyncio.run(_run())
 

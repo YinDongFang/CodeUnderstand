@@ -21,7 +21,9 @@ router = APIRouter()
 
 class CreateTaskBody(BaseModel):
     workflow_key: str
+    name: str = ""
     input: dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateTaskResponse(BaseModel):
@@ -98,10 +100,12 @@ def _serialize_node(row: dict[str, Any]) -> dict[str, Any]:
 def _serialize_task_detail(row: dict[str, Any], nodes: list[dict[str, Any]]) -> dict[str, Any]:
     body: dict[str, Any] = {
         "id": row["id"],
+        "name": row.get("name"),
         "workflow_key": row["workflow_key"],
         "workflow_revision": row["workflow_revision"],
         "status": row["status"],
         "input": row["input_json"],
+        "context": row.get("context_json") or {},
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "worker_generation": row["worker_generation"],
@@ -148,6 +152,8 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
         workflow_key=wf.key,
         workflow_revision=wf.revision,
         input_obj=body.input,
+        name=body.name.strip() or None,
+        context_obj=body.context,
         tasks_root=str(cp.tasks_root),
     )
     root = _task_root(cp, tid)
@@ -170,12 +176,19 @@ def list_tasks(request: Request) -> list[dict[str, Any]]:
     return [
         {
             "id": r["id"],
+            "name": r.get("name"),
             "status": r["status"],
             "workflow_key": r["workflow_key"],
             "created_at": r["created_at"],
         }
         for r in rows
     ]
+
+
+@router.get("/workflows")
+def list_workflows(request: Request) -> list[dict[str, str]]:
+    cp = _cp(request)
+    return cp.engine.list_workflows()
 
 
 @router.get("/tasks/{task_id}")
