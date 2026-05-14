@@ -27,6 +27,18 @@ function formatTaskDisplayTime(iso: string | null | undefined): string {
   return new Date(t).toLocaleString()
 }
 
+/** Wall-clock seconds (e.g. active duration from API). */
+function formatWallSeconds(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  if (m < 60) return r ? `${m}m ${r}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return rm ? `${h}h ${rm}m` : `${h}h`
+}
+
 const LOG_NODE_MARKER = /\[\d+:[^\]]+\]/
 const LOG_RUN_BEGIN = 'WF_ENGINE_RUN_BEGIN'
 
@@ -48,15 +60,15 @@ function splitLogLinesIntoRuns(lines: string[]): string[][] {
 function logRunTitle(runLines: string[], runIndex: number, totalRuns: number): string {
   const first = runLines[0] ?? ''
   const m = first.match(/WF_ENGINE_RUN_BEGIN generation=(\d+)/)
-  if (m) return `运行 · worker_generation ${m[1]}`
-  if (totalRuns === 1) return '日志'
-  return runIndex === 0 ? '早期日志（无运行标记）' : `分段 ${runIndex + 1}`
+  if (m) return `Run · worker_generation ${m[1]}`
+  if (totalRuns === 1) return 'Log'
+  return runIndex === 0 ? 'Legacy log (no run marker)' : `Section ${runIndex + 1}`
 }
 
-/** Group log lines by first `[ordinal:node_id]` marker per line (worker inserts in each line); unprefixed lines stay in ``current`` bucket (starts as 全局). */
+/** Group log lines by first `[ordinal:node_id]` marker per line; unprefixed lines stay in ``global``. */
 function groupLogLines(lines: string[]): Array<{ title: string; lines: string[] }> {
   const out: Array<{ title: string; lines: string[] }> = []
-  let curTitle = '全局'
+  let curTitle = 'global'
 
   function ensureCur() {
     const last = out[out.length - 1]
@@ -216,18 +228,18 @@ function nodeTiming(n: TaskNode, nowMs: number): { summary: string; detail?: str
   const st = n.status.toLowerCase()
 
   if (t0 === null) {
-    return { summary: '未开始' }
+    return { summary: 'Not started' }
   }
   if (t1 !== null) {
     return {
-      summary: `耗时 ${formatDuration(t1 - t0)}`,
+      summary: `Duration ${formatDuration(t1 - t0)}`,
       detail: `${formatClockUtc(t0)} → ${formatClockUtc(t1)}`,
     }
   }
   if (st === 'running' || st === 'waiting_human') {
-    return { summary: `已运行 ${formatDuration(Math.max(0, nowMs - t0))}` }
+    return { summary: `Running ${formatDuration(Math.max(0, nowMs - t0))}` }
   }
-  return { summary: `开始 ${formatClockUtc(t0)}` }
+  return { summary: `Started ${formatClockUtc(t0)}` }
 }
 
 function sortedNodes(nodes: TaskNode[]): TaskNode[] {
@@ -443,7 +455,7 @@ export default function App() {
       if (!selectedId || !detail) return
       if (
         !window.confirm(
-          `从节点「${nodeId}」重新执行？将重置该节点及后续节点并拉取此前快照。`,
+          `Rerun from node "${nodeId}"? This resets this node and all following nodes and restores prior snapshots.`,
         )
       ) {
         return
@@ -540,10 +552,16 @@ export default function App() {
                     type="button"
                     className={t.id === selectedId ? 'task-row active' : 'task-row'}
                     onClick={() => setSelectedId(t.id)}
-                    title={`${t.workflow_key} · ${t.id}`}
+                    title={`${t.workflow_key} · ${t.id} · Run ${t.execution_count ?? 0} · ${formatWallSeconds(t.active_duration_seconds ?? 0)} active (excl. interrupt)`}
                   >
-                    <span className="task-row-name">{displayTaskName(t)}</span>
-                    <span className={chipClass(t.status)}>{t.status}</span>
+                    <span className="task-row-main">
+                      <span className="task-row-name">{displayTaskName(t)}</span>
+                      <span className={chipClass(t.status)}>{t.status}</span>
+                    </span>
+                    <span className="task-row-meta muted small">
+                      Run {t.execution_count ?? 0} · {formatWallSeconds(t.active_duration_seconds ?? 0)}{' '}
+                      active
+                    </span>
                   </button>
                 </li>
               ))}
@@ -551,42 +569,52 @@ export default function App() {
             {!tasks.length && !tasksErr && <p className="muted">暂无任务</p>}
           </aside>
           <main className="pane right">
-            {!selectedId && <p className="muted">选择一项任务。</p>}
+            {!selectedId && <p className="muted">Select a task.</p>}
             {selectedId && detailErr && <p className="err">{detailErr}</p>}
             {detail && (
               <>
                 <h2 className="task-detail-title">{displayTaskName(detail)}</h2>
                 <dl className="meta">
-                  <dt>id</dt>
+                  <dt>Id</dt>
                   <dd className="mono">{detail.id}</dd>
-                  <dt>workflow</dt>
+                  <dt>Workflow</dt>
                   <dd>
                     {detail.workflow_key}{' '}
                     <span className="muted">rev {detail.workflow_revision}</span>
                   </dd>
-                  <dt>status</dt>
+                  <dt>Status</dt>
                   <dd>
                     <span className={chipClass(detail.status)}>{detail.status}</span>
                   </dd>
-                  <dt>创建时间</dt>
+                  <dt>Created at</dt>
                   <dd>{formatTaskDisplayTime(detail.created_at)}</dd>
-                  <dt>完成时间</dt>
+                  <dt>Completed at</dt>
                   <dd>
                     {TASK_TERMINAL.has(detail.status)
                       ? formatTaskDisplayTime(detail.updated_at)
                       : '—'}
                   </dd>
+                  <dt>Execution count</dt>
+                  <dd>{detail.execution_count ?? 0}</dd>
+                  <dt>Active duration</dt>
+                  <dd title="Wall time excluding waiting_human (interrupt)">
+                    {formatWallSeconds(detail.active_duration_seconds ?? 0)} (excl. interrupt)
+                  </dd>
                 </dl>
 
-                {hasDictContent(detail.input) && <KvBlock title="输入 (input)" data={detail.input} />}
+                {hasDictContent(detail.input) && <KvBlock title="Input" data={detail.input} />}
 
                 {hasDictContent(detail.context) && (
-                  <KvBlock title="上下文 (context)" data={detail.context} />
+                  <KvBlock title="Context" data={detail.context} />
                 )}
 
-                <h3 className="section-heading">节点（顺序）</h3>
+                <h3 className="section-heading">Nodes</h3>
                 {nodeActionErr && <p className="err">{nodeActionErr}</p>}
-                <div className="node-strip" role="list" aria-label="工作流节点，按执行顺序从左到右">
+                <div
+                  className="node-strip"
+                  role="list"
+                  aria-label="Workflow nodes in execution order, left to right"
+                >
                   {sortedNodes(detail.nodes).map((n, idx) => {
                     const timing = nodeTiming(n, nowTick)
                     const errMsg =
@@ -624,12 +652,12 @@ export default function App() {
                             }
                             title={
                               detail.status === 'waiting_human'
-                                ? '等待人工处理时不可重跑'
-                                : '从该节点重新执行（POST /tasks/…/rerun）'
+                                ? 'Cannot rerun while waiting for human input'
+                                : 'Rerun from this node (POST /tasks/…/rerun)'
                             }
                             onClick={() => void onRerunFromNode(n.node_id)}
                           >
-                            {rerunBusyNodeId === n.node_id ? '提交中…' : '从此节点重跑'}
+                            {rerunBusyNodeId === n.node_id ? 'Submitting…' : 'Rerun from here'}
                           </button>
                         </div>
                       </Fragment>
@@ -684,7 +712,7 @@ export default function App() {
                         >
                           <summary className="log-run-summary">
                             <span className="log-run-title">{runTitle}</span>
-                            <span className="muted log-summary-meta">{runLines.length} 行</span>
+                            <span className="muted log-summary-meta">{runLines.length} lines</span>
                           </summary>
                           <div className="log-run-body">
                             {nodeGroups.map((g, i) => (
@@ -695,7 +723,7 @@ export default function App() {
                               >
                                 <summary className="log-summary">
                                   <span className="log-summary-label">{g.title}</span>
-                                  <span className="muted log-summary-meta">{g.lines.length} 行</span>
+                                  <span className="muted log-summary-meta">{g.lines.length} lines</span>
                                 </summary>
                                 <pre className="log-block-body">{g.lines.join('\n')}</pre>
                               </details>

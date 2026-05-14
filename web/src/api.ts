@@ -30,6 +30,8 @@ export type TaskSummary = {
   workflow_key: string
   name?: string | null
   created_at: string
+  execution_count: number
+  active_duration_seconds: number
 }
 
 export type TaskNode = {
@@ -61,6 +63,8 @@ export type TaskDetail = {
   created_at: string
   updated_at: string
   worker_generation: number
+  execution_count: number
+  active_duration_seconds: number
   nodes: TaskNode[]
   interrupt?: InterruptInfo
 }
