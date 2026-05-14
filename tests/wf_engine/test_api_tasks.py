@@ -1,12 +1,11 @@
-"""FastAPI task API integration tests (ASGI transport)."""
+"""FastAPI task API integration tests (同步 TestClient，避免 Windows 上 asyncio.run 的 SIGINT 处理误报 KeyboardInterrupt)."""
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from starlette.testclient import TestClient
 
 from wf_engine import status as S
 from wf_engine.context import NodeContext
@@ -57,47 +56,39 @@ def test_post_tasks_returns_201_and_get_shows_succeeded_nodes(api_setup):
     app = api_setup["app"]
     tasks_root: Path = api_setup["tasks_root"]
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "api_wf", "input": {}})
-            assert r.status_code == 201
-            task_id = r.json()["task_id"]
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "api_wf", "input": {}})
+        assert r.status_code == 201
+        task_id = r.json()["task_id"]
 
-            r2 = await client.get(f"/tasks/{task_id}")
-            assert r2.status_code == 200
-            body = r2.json()
-            assert body["status"] == S.TASK_SUCCEEDED
-            assert len(body["nodes"]) == 1
-            assert body["nodes"][0]["node_id"] == "step1"
-            assert body["nodes"][0]["status"] == S.NODE_SUCCESS
+        r2 = client.get(f"/tasks/{task_id}")
+        assert r2.status_code == 200
+        body = r2.json()
+        assert body["status"] == S.TASK_SUCCEEDED
+        assert len(body["nodes"]) == 1
+        assert body["nodes"][0]["node_id"] == "step1"
+        assert body["nodes"][0]["status"] == S.NODE_SUCCESS
 
-            tr = tasks_root / task_id
-            assert (task_layout(tr).workspace / "out.txt").read_text(encoding="utf-8") == "x"
-
-    asyncio.run(_run())
+        tr = tasks_root / task_id
+        assert (task_layout(tr).workspace / "out.txt").read_text(encoding="utf-8") == "x"
 
 
 def test_list_tasks_returns_summary(api_setup):
     app = api_setup["app"]
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "api_wf", "input": {"k": 1}})
-            assert r.status_code == 201
-            task_id = r.json()["task_id"]
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "api_wf", "input": {"k": 1}})
+        assert r.status_code == 201
+        task_id = r.json()["task_id"]
 
-            listed = await client.get("/tasks")
-            assert listed.status_code == 200
-            rows = listed.json()
-            assert len(rows) == 1
-            assert rows[0]["id"] == task_id
-            assert rows[0]["workflow_key"] == "api_wf"
-            assert rows[0]["status"] == S.TASK_SUCCEEDED
-            assert "created_at" in rows[0]
-
-    asyncio.run(_run())
+        listed = client.get("/tasks")
+        assert listed.status_code == 200
+        rows = listed.json()
+        assert len(rows) == 1
+        assert rows[0]["id"] == task_id
+        assert rows[0]["workflow_key"] == "api_wf"
+        assert rows[0]["status"] == S.TASK_SUCCEEDED
+        assert "created_at" in rows[0]
 
 
 def test_task_logs_with_cursor(tmp_path: Path):
@@ -122,27 +113,23 @@ def test_task_logs_with_cursor(tmp_path: Path):
         spawn_worker_fn=_sync_spawn(eng, store),
     )
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "api_log", "input": {}})
-            task_id = r.json()["task_id"]
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "api_log", "input": {}})
+        task_id = r.json()["task_id"]
 
-            log_path = task_layout(tasks_root / task_id).logs / "task.log"
-            log_path.write_text("alpha\nbeta\n", encoding="utf-8")
+        log_path = task_layout(tasks_root / task_id).logs / "task.log"
+        log_path.write_text("alpha\nbeta\n", encoding="utf-8")
 
-            r2 = await client.get(f"/tasks/{task_id}/logs")
-            assert r2.status_code == 200
-            payload = r2.json()
-            assert payload["lines"] == ["alpha", "beta"]
+        r2 = client.get(f"/tasks/{task_id}/logs")
+        assert r2.status_code == 200
+        payload = r2.json()
+        assert payload["lines"] == ["alpha", "beta"]
 
-            mid = payload["next_cursor"] // 2
-            r3 = await client.get(f"/tasks/{task_id}/logs?cursor={mid}")
-            rest = r3.json()
-            assert rest["next_cursor"] == payload["next_cursor"]
-            assert isinstance(rest["lines"], list)
-
-    asyncio.run(_run())
+        mid = payload["next_cursor"] // 2
+        r3 = client.get(f"/tasks/{task_id}/logs?cursor={mid}")
+        rest = r3.json()
+        assert rest["next_cursor"] == payload["next_cursor"]
+        assert isinstance(rest["lines"], list)
 
 
 def test_interrupt_resolve_roundtrip(tmp_path: Path):
@@ -181,54 +168,46 @@ def test_interrupt_resolve_roundtrip(tmp_path: Path):
         spawn_worker_fn=_sync_spawn(eng, store),
     )
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "api_interrupt", "input": {}})
-            task_id = r.json()["task_id"]
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "api_interrupt", "input": {}})
+        task_id = r.json()["task_id"]
 
-            detail = await client.get(f"/tasks/{task_id}")
-            assert detail.status_code == 200
-            body = detail.json()
-            assert body["status"] == S.TASK_WAITING_HUMAN
-            assert "interrupt" in body
-            assert body["interrupt"]["node_id"] == "b"
-            seq = body["interrupt"]["seq"]
+        detail = client.get(f"/tasks/{task_id}")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["status"] == S.TASK_WAITING_HUMAN
+        assert "interrupt" in body
+        assert body["interrupt"]["node_id"] == "b"
+        seq = body["interrupt"]["seq"]
 
-            bad = await client.post(
-                f"/tasks/{task_id}/interrupt/resolve",
-                json={"interrupt_seq": seq + 99, "payload": {"text": "no"}},
-            )
-            assert bad.status_code == 409
+        bad = client.post(
+            f"/tasks/{task_id}/interrupt/resolve",
+            json={"interrupt_seq": seq + 99, "payload": {"text": "no"}},
+        )
+        assert bad.status_code == 409
 
-            bad_payload = await client.post(
-                f"/tasks/{task_id}/interrupt/resolve",
-                json={"payload": {"text": 123}},
-            )
-            assert bad_payload.status_code == 422
+        bad_payload = client.post(
+            f"/tasks/{task_id}/interrupt/resolve",
+            json={"payload": {"text": 123}},
+        )
+        assert bad_payload.status_code == 422
 
-            ok = await client.post(
-                f"/tasks/{task_id}/interrupt/resolve",
-                json={"interrupt_seq": seq, "payload": {"text": "hi"}},
-            )
-            assert ok.status_code == 202
+        ok = client.post(
+            f"/tasks/{task_id}/interrupt/resolve",
+            json={"interrupt_seq": seq, "payload": {"text": "hi"}},
+        )
+        assert ok.status_code == 202
 
-            done = await client.get(f"/tasks/{task_id}")
-            assert done.json()["status"] == S.TASK_SUCCEEDED
-
-    asyncio.run(_run())
+        done = client.get(f"/tasks/{task_id}")
+        assert done.json()["status"] == S.TASK_SUCCEEDED
 
 
 def test_get_task_404_returns_top_level_error(api_setup):
     app = api_setup["app"]
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.get("/tasks/does-not-exist-uuid")
-            assert r.status_code == 404
-            body = r.json()
-            assert "error" in body
-            assert body["error"]["code"] == "not_found"
-
-    asyncio.run(_run())
+    with TestClient(app) as client:
+        r = client.get("/tasks/does-not-exist-uuid")
+        assert r.status_code == 404
+        body = r.json()
+        assert "error" in body
+        assert body["error"]["code"] == "not_found"

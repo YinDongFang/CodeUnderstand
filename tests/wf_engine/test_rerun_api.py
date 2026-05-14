@@ -1,14 +1,13 @@
-"""Integration tests for POST /tasks/{id}/rerun."""
+"""Integration tests for POST /tasks/{id}/rerun (同步 TestClient)."""
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 from pathlib import Path
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from starlette.testclient import TestClient
 
 from wf_engine import status as S
 from wf_engine.context import NodeContext
@@ -62,37 +61,33 @@ def test_rerun_from_middle_restores_workspace_and_completes(three_node_setup):
     app = three_node_setup["app"]
     tasks_root: Path = three_node_setup["tasks_root"]
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "rerun_wf", "input": {}})
-            assert r.status_code == 201
-            task_id = r.json()["task_id"]
-            tr = tasks_root / task_id
-            ws = task_layout(tr).workspace
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "rerun_wf", "input": {}})
+        assert r.status_code == 201
+        task_id = r.json()["task_id"]
+        tr = tasks_root / task_id
+        ws = task_layout(tr).workspace
 
-            d0 = await client.get(f"/tasks/{task_id}")
-            assert d0.json()["status"] == S.TASK_SUCCEEDED
-            gen_before = d0.json()["worker_generation"]
+        d0 = client.get(f"/tasks/{task_id}")
+        assert d0.json()["status"] == S.TASK_SUCCEEDED
+        gen_before = d0.json()["worker_generation"]
 
-            assert (ws / "s1.txt").read_text(encoding="utf-8") == "one"
-            assert (ws / "s2.txt").read_text(encoding="utf-8") == "two"
-            _clear_workspace_for_test(ws)
+        assert (ws / "s1.txt").read_text(encoding="utf-8") == "one"
+        assert (ws / "s2.txt").read_text(encoding="utf-8") == "two"
+        _clear_workspace_for_test(ws)
 
-            rr = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
-            assert rr.status_code == 202
+        rr = client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
+        assert rr.status_code == 202
 
-            d1 = await client.get(f"/tasks/{task_id}")
-            body = d1.json()
-            assert body["status"] == S.TASK_SUCCEEDED
-            assert body["worker_generation"] == gen_before + 1
-            assert (ws / "s1.txt").read_text(encoding="utf-8") == "one"
-            assert (ws / "s2.txt").read_text(encoding="utf-8") == "two"
-            assert (ws / "s3.txt").read_text(encoding="utf-8") == "three"
-            for n in body["nodes"]:
-                assert n["status"] == S.NODE_SUCCESS
-
-    asyncio.run(_run())
+        d1 = client.get(f"/tasks/{task_id}")
+        body = d1.json()
+        assert body["status"] == S.TASK_SUCCEEDED
+        assert body["worker_generation"] == gen_before + 1
+        assert (ws / "s1.txt").read_text(encoding="utf-8") == "one"
+        assert (ws / "s2.txt").read_text(encoding="utf-8") == "two"
+        assert (ws / "s3.txt").read_text(encoding="utf-8") == "three"
+        for n in body["nodes"]:
+            assert n["status"] == S.NODE_SUCCESS
 
 
 def _clear_workspace_for_test(ws: Path) -> None:
@@ -106,24 +101,20 @@ def _clear_workspace_for_test(ws: Path) -> None:
 def test_rerun_missing_snapshot_returns_409(three_node_setup):
     app = three_node_setup["app"]
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "rerun_wf", "input": {}})
-            task_id = r.json()["task_id"]
-            detail = await client.get(f"/tasks/{task_id}")
-            assert detail.json()["status"] == S.TASK_SUCCEEDED
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "rerun_wf", "input": {}})
+        task_id = r.json()["task_id"]
+        detail = client.get(f"/tasks/{task_id}")
+        assert detail.json()["status"] == S.TASK_SUCCEEDED
 
-            nodes = detail.json()["nodes"]
-            zip0 = nodes[0]["zip_path"]
-            assert zip0
-            Path(zip0).unlink()
+        nodes = detail.json()["nodes"]
+        zip0 = nodes[0]["zip_path"]
+        assert zip0
+        Path(zip0).unlink()
 
-            resp = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
-            assert resp.status_code == 409
-            assert resp.json()["error"]["code"] == "missing_snapshot"
-
-    asyncio.run(_run())
+        resp = client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "missing_snapshot"
 
 
 def test_rerun_rejected_when_waiting_human(tmp_path: Path):
@@ -145,18 +136,14 @@ def test_rerun_rejected_when_waiting_human(tmp_path: Path):
     tasks_root = tmp_path / "runs"
     app = create_app(eng, store, tasks_root, spawn_worker_fn=_sync_spawn(eng, store))
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "rh", "input": {}})
-            task_id = r.json()["task_id"]
-            d = await client.get(f"/tasks/{task_id}")
-            assert d.json()["status"] == S.TASK_WAITING_HUMAN
-            resp = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
-            assert resp.status_code == 409
-            assert resp.json()["error"]["code"] == "invalid_task_status"
-
-    asyncio.run(_run())
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "rh", "input": {}})
+        task_id = r.json()["task_id"]
+        d = client.get(f"/tasks/{task_id}")
+        assert d.json()["status"] == S.TASK_WAITING_HUMAN
+        resp = client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "invalid_task_status"
 
 
 def test_rerun_rejected_when_worker_lease_active(tmp_path: Path):
@@ -185,14 +172,10 @@ def test_rerun_rejected_when_worker_lease_active(tmp_path: Path):
     tasks_root = tmp_path / "runs"
     app = create_app(eng, store, tasks_root, spawn_worker_fn=_sync_spawn(eng, store))
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(f"/tasks/{tid}/rerun", json={"from_node_id": "a"})
-            assert resp.status_code == 409
-            assert resp.json()["error"]["code"] == "worker_busy"
-
-    asyncio.run(_run())
+    with TestClient(app) as client:
+        resp = client.post(f"/tasks/{tid}/rerun", json={"from_node_id": "a"})
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "worker_busy"
 
 
 def test_rerun_after_node_failure_completes(tmp_path: Path):
@@ -220,18 +203,14 @@ def test_rerun_after_node_failure_completes(tmp_path: Path):
     tasks_root = tmp_path / "runs"
     app = create_app(eng, store, tasks_root, spawn_worker_fn=_sync_spawn(eng, store))
 
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "fail_once", "input": {}})
-            task_id = r.json()["task_id"]
-            d = await client.get(f"/tasks/{task_id}")
-            assert d.json()["status"] == S.TASK_FAILED
+    with TestClient(app) as client:
+        r = client.post("/tasks", json={"workflow_key": "fail_once", "input": {}})
+        task_id = r.json()["task_id"]
+        d = client.get(f"/tasks/{task_id}")
+        assert d.json()["status"] == S.TASK_FAILED
 
-            rr = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
-            assert rr.status_code == 202
+        rr = client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
+        assert rr.status_code == 202
 
-            done = await client.get(f"/tasks/{task_id}")
-            assert done.json()["status"] == S.TASK_SUCCEEDED
-
-    asyncio.run(_run())
+        done = client.get(f"/tasks/{task_id}")
+        assert done.json()["status"] == S.TASK_SUCCEEDED
