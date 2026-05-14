@@ -1,0 +1,12 @@
+TASK_PENDING = "pending"
+TASK_RUNNING = "running"
+TASK_WAITING_HUMAN = "waiting_human"
+TASK_SUCCEEDED = "succeeded"
+TASK_FAILED = "failed"
+TASK_FAILED_STALLED = "stalled"
+
+NODE_PENDING = "pending"
+NODE_RUNNING = "running"
+NODE_WAITING_HUMAN = "waiting_human"
+NODE_SUCCESS = "success"
+NODE_FAILED = "failed"
