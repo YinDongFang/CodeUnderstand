@@ -893,8 +893,8 @@ def test_interrupt_then_resolve_completes_node():
         wf.add_node("b", n2, whitelist=["h.txt"])
         tr = Path(td) / "tasks" / "t1"
         layout = task_layout(tr)
-        layout.workspace.mkdir(parents=True, parents=True)
-        layout.zips.mkdir(parents=True, parents=True)
+        layout.workspace.mkdir(parents=True)
+        layout.zips.mkdir(parents=True)
         tid = store.create_task(
             workflow_key="w1",
             workflow_revision="1",
