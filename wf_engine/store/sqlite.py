@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from wf_engine import status as S
-from wf_engine.lease_util import parse_utc_iso, pid_alive
+from wf_engine.utils.lease_util import parse_utc_iso, pid_alive
 
 CONSOLE_SETTINGS_KEY = "console_settings"
 LEGACY_OPS_KEY = "ops_globals"

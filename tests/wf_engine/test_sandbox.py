@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from wf_engine.sandbox import resolve_node_workdir
+from wf_engine.utils.sandbox import resolve_node_workdir
 
 
 def test_resolve_rejects_double_dot_segments() -> None:

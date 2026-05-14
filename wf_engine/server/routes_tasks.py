@@ -12,9 +12,9 @@ from jsonschema.exceptions import ValidationError
 from pydantic import BaseModel, Field
 
 from wf_engine import status as S
-from wf_engine.lease_util import parse_utc_iso, pid_alive
-from wf_engine.paths import task_layout
-from wf_engine.sandbox import resolve_node_workdir
+from wf_engine.utils.lease_util import parse_utc_iso, pid_alive
+from wf_engine.utils.paths import task_layout
+from wf_engine.utils.sandbox import resolve_node_workdir
 from wf_engine.server.paths_util import effective_tasks_root
 from wf_engine.server.state import ControlPlaneState
 from wf_engine.task_timing import compute_active_duration_seconds

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from wf_engine import status as S
-from wf_engine.lease_util import parse_utc_iso
+from wf_engine.utils.lease_util import parse_utc_iso
 
 _TERMINAL = frozenset({S.TASK_SUCCEEDED, S.TASK_FAILED, S.TASK_FAILED_STALLED})
 

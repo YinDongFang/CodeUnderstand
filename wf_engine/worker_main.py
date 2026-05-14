@@ -10,8 +10,8 @@ import traceback
 from pathlib import Path
 
 from wf_engine.engine import Engine
-from wf_engine.lease_util import utc_iso_after
-from wf_engine.paths import task_layout
+from wf_engine.utils.lease_util import utc_iso_after
+from wf_engine.utils.paths import task_layout
 from wf_engine.runner import run_once, wf_log_node
 from wf_engine.store.sqlite import SqliteStore
 

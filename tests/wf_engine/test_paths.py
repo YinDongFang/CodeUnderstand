@@ -1,5 +1,5 @@
 from pathlib import Path
-from wf_engine.paths import task_layout
+from wf_engine.utils.paths import task_layout
 
 
 def test_task_layout_under_tasks_root():
