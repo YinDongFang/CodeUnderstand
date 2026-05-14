@@ -3,6 +3,8 @@ import os
 
 import pytest
 
+from cu.logging_config import configure_logging
+
 
 def pytest_configure(config):
     """未显式 export 时默认开启测试模式，使 stage_env() 注入 *USE_MOCK_CLAUDE。
@@ -10,6 +12,8 @@ def pytest_configure(config):
     必须用真实 Claude 的用例可在模块或测试中 ``monkeypatch.setenv('CU_TEST_MODE', '0')``。
     """
     os.environ.setdefault("CU_TEST_MODE", "1")
+    os.environ.setdefault("CU_LOG_LEVEL", "WARNING")
+    configure_logging()
 
 
 @pytest.fixture
@@ -27,6 +31,7 @@ def isolated_env(tmp_path, monkeypatch):
     cu_root = tmp_path / "cu_data"
     monkeypatch.setenv("HOME", str(real_home))
     monkeypatch.setenv("CU_DATA_ROOT", str(cu_root))
+    monkeypatch.setenv("CU_JOB_WORKER_INLINE", "1")
     return {
         "real_home": real_home,
         "cu_root": cu_root,

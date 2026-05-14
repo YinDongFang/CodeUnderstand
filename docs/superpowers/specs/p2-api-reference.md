@@ -15,7 +15,7 @@
 | `GET` | `/api/v1/jobs/{job_id}/artifacts/zip` | 返回 `zip` 文件下载（不存在则 404）|
 | `GET` | `/api/v1/meta` | `{ version, web_ui }` |
 
-- **触发 `POST .../stages/build/run` / `rerun`**（经由当前进程 API）且 **stage=`build`** 时，服务端会在 **export+zip** 前自动跑一次 **`rewrite.py --stdin-lines`**（stdin 投喂当前会话题目，常为幂等等同写回）。**CLI `cu run` 不受影响**。
+- **触发 `POST .../stages/build/run` / `rerun`**（经由当前进程 API）且 **stage=`build`** 时，服务端会在 **export+zip** 前自动跑一次 **`cu.pipeline.rewrite` 的 stdin-lines 写回**（stdin 投喂当前会话题目，常为幂等等同写回）。**CLI `cu run` 不受影响**。
 - **`GET/`**：若构建了 `web/dist/index.html`，`cu serve` 同时托管静态 UI（SPA Hash 路由 `#/`）。
 
 ## CLI 子命令

@@ -6,6 +6,7 @@ pid_sink：可选回调，启动子进程后立刻把 PID 喂给调用方（用�
 from __future__ import annotations
 
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -48,9 +49,15 @@ def _spawn_and_wait(
     stdin_arg = subprocess.PIPE if stdin_data is not None else None
     text_mode = stdin_data is None or isinstance(stdin_data, str)
     proc = subprocess.Popen(
-        cmd, env=env, cwd=cwd,
+        cmd,
+        env=env,
+        cwd=cwd,
         stdin=stdin_arg,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=text_mode,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text_mode,
+        encoding="utf-8" if text_mode else None,
+        errors="replace" if text_mode else None,
     )
     if pid_sink is not None:
         pid_sink(proc.pid)
@@ -104,4 +111,26 @@ def run_python(
         env=env, cwd=cwd, timeout=timeout,
         stream=stream, pid_sink=pid_sink,
         stdin_data=stdin_data,
+    )
+
+
+def run_module(
+    module: str,
+    module_args: list[str] | None = None,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+    timeout: int | None = None,
+    stream: bool = False,
+    pid_sink: PidSink = None,
+) -> RunResult:
+    """``python -m <module>``（解释器与当前进程一致）。"""
+    return _spawn_and_wait(
+        [sys.executable, "-m", module] + (module_args or []),
+        env=env,
+        cwd=cwd,
+        timeout=timeout,
+        stream=stream,
+        pid_sink=pid_sink,
+        stdin_data=None,
     )

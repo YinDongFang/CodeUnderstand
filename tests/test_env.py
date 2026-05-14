@@ -29,6 +29,8 @@ def test_stage_env_sets_home(tmp_path, monkeypatch):
     )
     assert env["OUTPUTS_DIR"] == expected_home
     assert env["CODE_UNDERSTAND_STATE_ROOT"] == expected_home
+    assert env["CU_JOB_PIPELINE"] == "1"
+    assert env["GH_ARCHIVE_PROXY_PREFIX"].startswith("http")
     assert env["SESSION_ID"] == "sess-uuid"
     assert "PATH" in env
 

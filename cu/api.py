@@ -19,6 +19,7 @@ from cu.events import sse_event_line
 from cu.events import subscribe as events_subscribe
 from cu.models import JOB_STAGES
 from cu.paths import artifact_root
+from cu.pipeline_env import normalize_session_id_filename
 from cu.session_questions import apply_question_lines, extract_question_lines
 
 
@@ -87,12 +88,11 @@ def _artifact_zip_path(job_id: str, repo: str) -> str:
 
 
 def _session_jsonl_from_record(rec: object) -> str:
-    sid = getattr(rec, "session_id", "") or ""
+    sid_raw = (getattr(rec, "session_id", "") or "").strip()
     cdir = getattr(rec, "claude_project_dir", "") or ""
-    if not sid or not cdir:
+    if not sid_raw or not cdir:
         return ""
-    if sid.lower().endswith(".jsonl"):
-        sid = sid[:-6]
+    sid = normalize_session_id_filename(sid_raw)
     return os.path.join(cdir, f"{sid}.jsonl")
 
 

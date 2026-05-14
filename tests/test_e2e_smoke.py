@@ -10,6 +10,10 @@ import sys
 import pytest
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="慢速冒烟依赖 Linux/Git Bash 路径与工具链；见模块说明，请在 Linux CI 或 WSL 下执行",
+)
 @pytest.mark.slow
 def test_cli_bootstrap_only(tmp_path, monkeypatch):
     """仅跑 bootstrap 阶段，验证沙箱建立与代码下载。"""

@@ -1,12 +1,16 @@
 # P1 · 沙箱与脚本接入 — 实现计划
 
+> **归档说明（2026-05）**：下文任务表基于 **bash 脚本 + `run_script`** 时代书写，**已与当前代码基线不符**。流水线实现以 **`cu.pipeline.*` / `cu.runtime.*`** 与 **`docs/superpowers/specs/2026-05-13-shell-to-python-design.md`** 为准。本文件仅作历史任务分解参考，实施时勿再照抄其中的 `*.sh` 路径。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在 Ubuntu 上通过 Python CLI 端到端跑通 1 个 repo 的 4 宏阶段（bootstrap → conversation → compile → build），输出干净 zip；全程使用沙箱 `$HOME` 隔离。
 
-**Architecture:** Python 包 `cu/` 提供路径常量、沙箱创建、子进程调用和阶段编排；现有 bash 脚本通过环境变量注入适配新目录布局；编排器以 CLI 形式暴露，无 Web UI（P2/P3 负责）。
+**正文保留策略**：自「文件结构」起的表格与 Task 章节仍为 **bash 时代原文**，便于对照当初拆解粒度；所列 **`*.sh` 路径多数已从仓库移除**，勿当作现行清单执行。
 
-**Tech Stack:** Python 3.10+, pytest, bash, 现有脚本依赖（jq, claude, wget, zip, git）
+**Architecture（现行）**：Python 包 **`cu/`** 提供路径常量、沙箱创建、**`cu.runner.run_module`** 驱动的阶段编排与 **`cu.pipeline.*` / `cu.runtime.*`** 流水线；编排器同时有 **CLI** 与 **P3 Web/API**。
+
+**Tech Stack（现行）**：Python 3.10+、pytest、**`cu run` / uvicorn**；子进程依赖 **claude**（或 **`CU_TEST_MODE` + `cu.testing.mock_claude`**）、zip/git 等与 **`shell-to-python-design`** 清册一致。**上文若为历史措辞**：仍以归档说明为准。
 
 ---
 
@@ -1376,7 +1380,7 @@ git commit -m "test: add stage integration test with mock subprocess"
 
 - [ ] **Step 1: 创建冒烟测试**
 
-此测试在 **真实 Ubuntu 环境** 下运行（需要 `claude`、网络等），用 `@pytest.mark.slow` 标记，日常 CI 跳过：
+此测试在 **真实 Ubuntu 环境** 下运行（需要 `claude`、网络等），用 `@pytest.mark.slow` 标记；日常可用 **`pytest -m "not slow"`** 跳过：
 
 ```python
 """端到端冒烟测试 — 需要真实环境（claude, 网络）。

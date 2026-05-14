@@ -1,10 +1,11 @@
 """Orchestrator：作业生命周期与状态机持久化。
 
 约束：
-- 模块级单例（_ACTIVE 字典管理线程与 PID）
-- 每作业一个守护线程顺序跑 4 阶段
-- 每阶段：状态置 running → 调 STAGE_RUNNERS[stage](ctx) → 成功置 success + 拍快照（除 build）；失败置 failed
-- 失败/取消时停止后续阶段
+- 模块级单例（_ACTIVE 字典管理线程与子进程 PID）
+- 每作业一个守护线程；默认 **fork/exec 等价**：启动 ``python -m cu.job_worker`` 子进程串行跑若干宏阶段，
+  子进程 ``HOME`` 已由 ``stage_env`` 指向沙箱，与宿主机隔离。
+- pytest 默认 ``CU_JOB_WORKER_INLINE=1``（见 ``tests/conftest.py``），在同进程跑流水线以便 mock ``STAGE_RUNNERS``。
+- 失败/取消时停止后续阶段；取消时对子进程 ``SIGTERM``
 - DB 在 cu.paths.db_path() 处，由 init_db() 幂等创建
 """
 from __future__ import annotations
@@ -21,12 +22,12 @@ from datetime import datetime, timezone
 from cu.db import get_connection, init_db
 from cu.models import JobRecord, StageRunRecord, JOB_STAGES
 from cu.paths import job_dir
+from cu.pipeline_env import github_web_url
 from cu.snapshot import (
-    save_snapshot,
     restore_snapshot,
     snapshot_exists,
 )
-from cu.stages import JobContext, STAGE_RUNNERS
+from cu.stages import STAGE_RUNNERS
 from cu.state import can_run_stage, stages_after
 
 
@@ -138,7 +139,7 @@ def create_job(zip_url: str, *, job_id: str | None = None, notes: str = "") -> J
     job_id = job_id or f"{repo}-{uuid.uuid4().hex[:8]}"
     rec = JobRecord(
         job_id=job_id, repo=repo, zip_url=zip_url,
-        github_url=f"https://github.com/{gh_user}/{repo}",
+        github_url=github_web_url(gh_user, repo),
         session_id="", claude_project_dir="",
         status="pending",
         created_at=_now(), updated_at=_now(),
@@ -180,9 +181,9 @@ def run_stage(
     """启动指定阶段执行（后台线程）。依赖未满足抛 ValueError，作业不存在抛 KeyError。
 
     end_stage: 包含式结束阶段；None 表示一直跑到最后一个阶段（build）。
-    on_event: 可选回调 (stage, message)，转交给 JobContext 让 stages.py fire。
+    on_event: 可选回调 (stage, message)，转交给 JobContext（``cu/stages/context.py``）并由编排线程转发 SSE。
     api_web_build_rewrite: 若为 True且本线程将执行 ``build`` 宏阶段，则 ``JobContext.build_with_rewrite`` 在执行该段时为 True
-        （Web API 驱动的 build 会跑一次 ``rewrite.py --stdin-lines``，与 CLI ``cu run`` 默认仅凭 export 不同）。
+        （Web API 驱动的 build 会跑一次 ``cu.pipeline.rewrite`` 的 stdin-lines 写回，与 CLI ``cu run`` 默认仅凭 export 不同）。
     """
     if end_stage is not None:
         if end_stage not in JOB_STAGES:
@@ -309,6 +310,112 @@ def _start_job_thread(
         return t
 
 
+def _invoke_job_worker_subprocess(
+    *,
+    job_id: str,
+    rec: JobRecord,
+    stages_to_run: list[str],
+    api_web_build_rewrite: bool,
+    merged_on_event,
+    pid_holder: list[int],
+) -> int:
+    """启动 ``cu.job_worker``；返回进程退出码。"""
+    import json
+    import socket
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+
+    from cu.env import stage_env
+
+    parent_sock, child_sock = socket.socketpair()
+    fd = child_sock.fileno()
+
+    worker_env = os.environ.copy()
+    worker_env.update(
+        stage_env(
+            job_id=rec.job_id,
+            repo=rec.repo,
+            session_id=rec.session_id or "",
+            github_url=rec.github_url,
+            claude_project_dir=rec.claude_project_dir or "",
+        )
+    )
+    worker_env["CU_JOB_EVENT_FD"] = str(fd)
+
+    ctx_payload = {
+        "job_id": rec.job_id,
+        "repo": rec.repo,
+        "zip_url": rec.zip_url,
+        "github_url": rec.github_url,
+        "session_id": rec.session_id or "",
+        "claude_project_dir": rec.claude_project_dir or "",
+    }
+    spec_obj = {
+        "job_id": job_id,
+        "stages_to_run": stages_to_run,
+        "ctx": ctx_payload,
+        "api_web_build_rewrite": api_web_build_rewrite,
+    }
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as tf:
+        json.dump(spec_obj, tf)
+        spec_path = tf.name
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "cu.job_worker", spec_path],
+        env=worker_env,
+        pass_fds=(fd,),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    child_sock.close()
+
+    pid_holder.clear()
+    pid_holder.append(proc.pid)
+
+    buf = b""
+
+    def read_events() -> None:
+        nonlocal buf
+        try:
+            while True:
+                chunk = parent_sock.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    payload = json.loads(line.decode("utf-8"))
+                    merged_on_event(payload["stage"], payload["message"])
+        finally:
+            parent_sock.close()
+
+    evt_thread = threading.Thread(target=read_events, daemon=True)
+    evt_thread.start()
+
+    rc = proc.wait()
+    evt_thread.join(timeout=5)
+
+    try:
+        os.unlink(spec_path)
+    except OSError:
+        pass
+
+    return rc if rc is not None else -1
+
+
+def _job_worker_inline_requested() -> bool:
+    raw = os.environ.get("CU_JOB_WORKER_INLINE", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def _run_thread(
     job_id: str,
     start_from: str,
@@ -336,65 +443,60 @@ def _run_thread(
         except Exception:
             pass
 
-    ctx = JobContext(
-        job_id=rec.job_id,
-        repo=rec.repo,
-        zip_url=rec.zip_url,
-        github_url=rec.github_url,
-        session_id=rec.session_id,
-        claude_project_dir=rec.claude_project_dir,
-        pid_sink=lambda pid: pid_holder.append(pid),
-        on_event=merged_on_event,
-    )
-
     idx_start = JOB_STAGES.index(start_from)
     idx_end = len(JOB_STAGES) - 1 if end_stage is None else JOB_STAGES.index(end_stage)
-    stages_to_run = JOB_STAGES[idx_start : idx_end + 1]
+    stages_to_run = list(JOB_STAGES[idx_start : idx_end + 1])
+
     try:
-        for stage in stages_to_run:
-            if cancel_flag.is_set():
-                _update_stage(job_id, stage, status="cancelled", ended_at=_now())
-                _update_job(job_id, status="cancelled")
-                return
+        if cancel_flag.is_set():
+            _update_job(job_id, status="cancelled")
+            return
 
-            attempt = _get_stages(job_id)[stage].attempt + 1
-            _update_stage(
-                job_id, stage,
-                status="running", started_at=_now(),
-                ended_at=None, exit_code=None, log_tail="",
-                attempt=attempt,
+        if _job_worker_inline_requested():
+            from cu.job_runner_core import run_stages_in_process
+            from cu.stages import JobContext
+
+            ctx = JobContext(
+                job_id=rec.job_id,
+                repo=rec.repo,
+                zip_url=rec.zip_url,
+                github_url=rec.github_url,
+                session_id=rec.session_id,
+                claude_project_dir=rec.claude_project_dir,
+                pid_sink=lambda pid: pid_holder.append(pid),
+                on_event=merged_on_event,
             )
-            pid_holder.clear()
-            try:
-                ctx.build_with_rewrite = api_web_build_rewrite and stage == "build"
-                STAGE_RUNNERS[stage](ctx)
-            except Exception as e:
-                log_tail = str(e)[-2000:]
-                _update_stage(
-                    job_id, stage,
-                    status="failed", ended_at=_now(),
-                    log_tail=log_tail,
-                )
-                _update_job(job_id, status="failed", notes=log_tail[:500])
-                return
-
-            _update_stage(job_id, stage, status="success", ended_at=_now())
-
-            # ctx 字段可能被 stages 写入（session_id / claude_project_dir），同步回 DB
-            _update_job(
+            rc = run_stages_in_process(
                 job_id,
-                session_id=ctx.session_id,
-                claude_project_dir=ctx.claude_project_dir,
+                stages_to_run,
+                ctx,
+                api_web_build_rewrite=api_web_build_rewrite,
+                cancel_flag=cancel_flag,
+            )
+        else:
+            rc = _invoke_job_worker_subprocess(
+                job_id=job_id,
+                rec=rec,
+                stages_to_run=stages_to_run,
+                api_web_build_rewrite=api_web_build_rewrite,
+                merged_on_event=merged_on_event,
+                pid_holder=pid_holder,
             )
 
-            if stage != "build":
-                save_snapshot(job_id, stage)
+        if cancel_flag.is_set():
+            _update_job(job_id, status="cancelled")
+            return
 
-        if idx_end >= len(JOB_STAGES) - 1:
-            _update_job(job_id, status="success")
-        else:
-            _update_job(job_id, status="pending")
+        if rc == 2:
+            return
+
+        if rc != 0:
+            j = _get_job(job_id)
+            if j is not None and j.status == "running":
+                _update_job(
+                    job_id, status="failed", notes=f"worker exited rc={rc}",
+                )
+            return
+
     finally:
-        # 不主动从 _ACTIVE 删除：线程对象的 is_alive() 会变 False；
-        # delete_job 与 _start_job_thread 都会清理或重建条目。
         pass

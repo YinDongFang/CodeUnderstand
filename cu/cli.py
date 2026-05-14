@@ -14,6 +14,7 @@ import argparse
 import sys
 
 from cu import orchestrator as orch
+from cu.logging_config import configure_logging
 from cu.models import JOB_STAGES
 
 
@@ -142,6 +143,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    configure_logging()
     parser = argparse.ArgumentParser(prog="cu", description="代码质检工作流 CLI")
     sub = parser.add_subparsers(dest="command")
 

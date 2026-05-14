@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-从 Claude Code 会话 JSONL 中提取「真实用户提问」（与 clean.py 规则一致），
+从 Claude Code 会话 JSONL 中提取「真实用户提问」（与 ``cu.pipeline.clean`` 规则一致），
 可选地批量替换 message.content 后写回。
 
-路径规则（与 build.sh / pack.sh 一致）：
+路径规则（与 ``cu.pipeline.build_docs`` / ``cu.pipeline.pack`` 约定一致）：
   sourcePath  ~/.claude/projects/-home-{USER}-projects-{repo_slug}/ 下会话 .jsonl
               （优先 SESSION_ID 环境变量对应文件；否则取该目录最新修改的顶层 *.jsonl）
   copyPath    ${OUTPUTS_DIR}/code-understand-{repo}/sessions/session1/session.jsonl
 
-临时编辑：${CODE_UNDERSTAND_STATE_ROOT}/tmp/{repo}_questions.txt（STATE_ROOT 默认 ~/Documents）。
+临时编辑：${CODE_UNDERSTAND_STATE_ROOT}/tmp/{repo}_questions.txt（未设置时 STATE_ROOT 默认为用户主目录）。
 
 用户消息仅从 sourcePath 解析并写入临时文件供编辑；编辑保存后，同一套「源正文→新正文」映射
 对 sourcePath 与 copyPath 两份 JSONL 均做字面量替换写回。
@@ -28,13 +28,13 @@ import subprocess
 import sys
 from typing import Any
 
+from cu.pipeline_env import normalize_session_id_filename, resolve_outputs_dir, resolve_state_root
+from cu.session_jsonl_io import load_jsonl_objects
+
 
 def _state_root() -> str:
-    """日志/agent 副本同根目录，与 run.sh / loop.sh 的 CODE_UNDERSTAND_STATE_ROOT 一致。"""
-    raw = os.environ.get("CODE_UNDERSTAND_STATE_ROOT", "").strip()
-    if raw:
-        return os.path.abspath(os.path.expanduser(raw))
-    return os.path.join(os.path.expanduser("~"), "Documents")
+    """日志/agent 副本同根目录，与 ``CODE_UNDERSTAND_STATE_ROOT`` 一致。"""
+    return str(resolve_state_root())
 
 
 def _infer_username() -> str:
@@ -54,7 +54,7 @@ def _infer_username() -> str:
 def resolve_source_session_jsonl(repo: str) -> str:
     """~/.claude/projects/-home-{USER}-projects-{repo_slug}/ 下的会话 .jsonl。
 
-    若环境变量 SESSION_ID 已设置且 ``{SESSION_ID}.jsonl`` 存在则用之（与 pack.sh / build.sh 一致）；
+    若环境变量 SESSION_ID 已设置且 ``{SESSION_ID}.jsonl`` 存在则用之（与 ``cu.pipeline.pack`` / ``cu.pipeline.build_docs`` 一致）；
     否则取该目录下最近修改的顶层 ``*.jsonl``。
     """
     user = _infer_username()
@@ -69,15 +69,14 @@ def resolve_source_session_jsonl(repo: str) -> str:
     if not os.path.isdir(d):
         raise FileNotFoundError(f"Claude 项目目录不存在: {d}")
 
-    sid = os.environ.get("SESSION_ID", "").strip()
+    sid_raw = os.environ.get("SESSION_ID", "").strip()
+    sid = normalize_session_id_filename(sid_raw) if sid_raw else ""
     if sid:
-        if sid.lower().endswith(".jsonl"):
-            sid = sid[:-6]
         exact = os.path.join(d, f"{sid}.jsonl")
         if os.path.isfile(exact):
             return exact
         print(
-            f"警告: SESSION_ID={sid!r} 时文件不存在 {exact}，改为选用目录下最新修改的 .jsonl",
+            f"警告: SESSION_ID={sid_raw!r} 时文件不存在 {exact}，改为选用目录下最新修改的 .jsonl",
             file=sys.stderr,
         )
 
@@ -95,29 +94,10 @@ def resolve_source_session_jsonl(repo: str) -> str:
 
 def resolve_copy_session_jsonl(repo: str) -> str:
     """${OUTPUTS_DIR}/code-understand-{repo}/sessions/session1/session.jsonl"""
-    raw = os.environ.get("OUTPUTS_DIR", "").strip()
-    if raw:
-        out_root = os.path.abspath(os.path.expanduser(raw))
-    else:
-        out_root = os.path.join(os.path.expanduser("~"), "outputs")
+    out_root = str(resolve_outputs_dir())
     return os.path.join(
         out_root, f"code-understand-{repo}", "sessions", "session1", "session.jsonl"
     )
-
-
-def _load_jsonl_objects(raw_lines: list[str]) -> list[Any | None]:
-    """与 raw_lines 下标一一对应（含空行、坏 JSON），仅用于解析提问列表。"""
-    out: list[Any | None] = []
-    for line in raw_lines:
-        s = line.strip()
-        if not s:
-            out.append(None)
-            continue
-        try:
-            out.append(json.loads(s))
-        except json.JSONDecodeError:
-            out.append(None)
-    return out
 
 
 def _is_real_user_question(obj: Any) -> bool:
@@ -220,13 +200,52 @@ def write_jsonl_with_text_mapping(
         os.remove(bak)
 
 
-def main() -> int:
+def rewrite_from_stdin_lines(repo: str, lines: list[str]) -> None:
+    """非交互、单来源写回：等价于 ``--non-interactive --single-source --stdin-lines``。
+
+    依赖当前进程的 ``HOME`` / ``OUTPUTS_DIR`` / ``CLAUDE_PROJECT_DIR`` / ``SESSION_ID``（由 ``stage_env`` 注入）。
+    若题目条数与 JSONL 中解析条数不一致则抛 ``ValueError`` / ``RuntimeError``。
+    """
+    repo_s = (repo or "").strip()
+    if not repo_s or "/" in repo_s or ".." in repo_s:
+        raise ValueError("repo 非法（须非空且不能含 / 或 ..）")
+
+    source_path = os.path.abspath(resolve_source_session_jsonl(repo_s))
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError(f"source 不是文件: {source_path}")
+
+    with open(source_path, "r", encoding="utf-8") as f:
+        raw_source = f.readlines()
+
+    objects = load_jsonl_objects(raw_source)
+    questions = collect_user_questions(objects)
+    if not questions:
+        return
+
+    new_list = list(lines)
+    if len(new_list) != len(questions):
+        raise ValueError(
+            f"题目条数为 {len(new_list)}，与会话中解析到的 {len(questions)} 不一致，未写回。"
+        )
+
+    source_to_new: dict[str, str] = {}
+    for old_text, new_text in zip(questions, new_list):
+        if new_text != old_text:
+            source_to_new[old_text] = new_text
+
+    if not source_to_new:
+        return
+
+    write_jsonl_with_text_mapping(source_path, raw_source, source_to_new)
+
+
+def main_cli(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="按 repo 解析 ~/.claude 与 OUTPUTS 下两份 session.jsonl，用 gedit 编辑并写回用户单行提问"
     )
     ap.add_argument(
         "repo",
-        help="项目名（与 pack.sh 第二参数相同，projects 下目录名），用于拼 Claude 目录与 code-understand 输出路径",
+        help="项目名（与 ``cu.pipeline.pack`` 第二参数相同，projects 下目录名），用于拼 Claude 目录与 code-understand 输出路径",
     )
     ap.add_argument(
         "--single-source", action="store_true",
@@ -240,7 +259,7 @@ def main() -> int:
         "--stdin-lines", action="store_true",
         help="仅在 --non-interactive 下：从 stdin 读 UTF-8 JSON 对象 {\"lines\":[\"题目\",...]}，跳过 tmp（无磁盘题面草稿）",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     repo = (args.repo or "").strip()
     if not repo or "/" in repo or ".." in repo:
         print("错误: repo 非法（须非空且不能含 / 或 ..）", file=sys.stderr)
@@ -268,7 +287,7 @@ def main() -> int:
     with open(source_path, "r", encoding="utf-8") as f:
         raw_source = f.readlines()
 
-    objects = _load_jsonl_objects(raw_source)
+    objects = load_jsonl_objects(raw_source)
     questions = collect_user_questions(objects)
     if not questions:
         print(
@@ -361,7 +380,7 @@ def main() -> int:
         if not os.path.isfile(copy_path):
             print(
                 f"错误: copyPath 不存在，无法同步写回: {copy_path}\n"
-                "请先执行 build.sh 生成 sessions/session1/session.jsonl，或检查 OUTPUTS_DIR。",
+                "请先执行 ``python -m cu.pipeline.build_docs`` 生成 sessions/session1/session.jsonl，或检查 OUTPUTS_DIR。",
                 file=sys.stderr,
             )
             return 1
@@ -381,5 +400,10 @@ def main() -> int:
     return 0
 
 
+def main() -> int:
+    """兼容旧名。"""
+    return main_cli()
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_cli())

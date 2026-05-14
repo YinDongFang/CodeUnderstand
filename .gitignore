@@ -12,3 +12,7 @@ __pycache__/
 *.egg-info/
 
 /web/node_modules
+/web/dist
+
+/.pytest_cache
+/testing

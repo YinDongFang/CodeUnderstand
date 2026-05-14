@@ -50,7 +50,7 @@ python -m pytest tests/test_e2e_smoke.py -v -m slow
 jobs/smoke-test/home/code-understand-nocode/code/nocode/README.md
 ```
 
-（及以下载产生的 `.git/` 等，与 `download.sh` 行为一致。）
+（及以下载产生的 `.git/` 等，与 ``cu.runtime.download.download_github_zip`` 行为一致。）
 
 CLI 等价命令（可自行在 shell 验证，数据将落在 **`CU_DATA_ROOT` / 默认 `~/.code-understand`**）：
 
@@ -68,15 +68,15 @@ python -m cu run \
 
 ## 环境与测试接缝（可选，缩短耗时）
 
-以下内容不影响「完成标准」，但适合你**不想调用真实 long-running `loop.sh`** 时做快速自检。
+以下内容不影响「完成标准」，但适合你**不想调用真实 long-running ``cu.pipeline.loop``** 时做快速自检。
 
 | 方式 | 作用 |
 |------|------|
-| **`CU_TEST_MODE=1`** | 由 **`cu.env.stage_env()`** 向子进程注入 **`LOOP_USE_MOCK_CLAUDE=1`**、**`BUILD_USE_MOCK_CLAUDE=1`**、**`CLASSIFY_USE_MOCK_CLAUDE=1`**：**仍执行** **`loop.sh`** 与 conversation 内的 **`build.sh`（BUILD_DOC_ONLY）**、`compile` 中的 **`classify.sh`**，但这些脚本对 **Claude CLI** 的调用统一走 **`testing/mock_claude.sh`**。实现与真值表见 **`cu/test_mode.py`**。**不要**将此结果当作生产等价验证。 |
+| **`CU_TEST_MODE=1`** | 由 **`cu.env.stage_env()`** 向子进程注入 **`LOOP_USE_MOCK_CLAUDE=1`**、**`BUILD_USE_MOCK_CLAUDE=1`**、**`CLASSIFY_USE_MOCK_CLAUDE=1`**：**仍执行** **`python -m cu.pipeline.loop`** 与 conversation 内的 **`python -m cu.pipeline.build_docs`（BUILD_DOC_ONLY）**、`compile` 中的 **`classify_main_type`**，但 Claude 调用统一走 **`python -m cu.testing.mock_claude`**。实现与真值表见 **`cu/test_mode.py`**。**不要**将此结果当作生产等价验证。 |
 | **`cu run --start STAGE [--end STAGE]`** | 只跑闭合区间 **`[start, end]`**；`end` 早于 `build` 时成功后作业 **`status` 常为 `pending`**，CLI 按区间内阶段是否全 `success` 决定退出码。 |
 | **`pytest` + patch** | 不被子进程继承；最快回归用 **`tests/test_orchestrator.py`**、**`tests/test_stages.py`**、**`tests/test_api.py`**（FastAPI `TestClient`）。 |
 
-示例（子进程仍会跑后续脚本，但整体比真实多轮 Claude **短得多**）：
+示例（子进程仍会跑后续 Python 模块，但整体比真实多轮 Claude **短得多**）：
 
 ```bash
 export CU_TEST_MODE=1
@@ -117,7 +117,7 @@ cu show u-001
 
 ### 3.2 可选：配合 `CU_TEST_MODE` 的 mock 全链冒烟
 
-若在 **§环境与测试接缝** 中已 **`export CU_TEST_MODE=1`**，再执行与 **§3.1** 相同的 `cu run`，用于验证 **`download → conversation（mock loop/doc）→ compile（mock classify）→ build`** 的编排与落盘；**仍会跑**真实 `loop.sh` 外壳逻辑，但不会调用真实 `claude`。**不要**将此结果当成生产等价验证。
+若在 **§环境与测试接缝** 中已 **`export CU_TEST_MODE=1`**，再执行与 **§3.1** 相同的 `cu run`，用于验证 **`download → conversation（mock loop/doc）→ compile（mock classify）→ build`** 的编排与落盘；**仍会启动** **`cu.pipeline.loop`** 子进程，但不会调用真实 `claude`。**不要**将此结果当成生产等价验证。
 
 ---
 
@@ -232,7 +232,7 @@ cu list
 ## 8. 失败回归（人为破坏验证错误处理）
 
 ```bash
-git stash push -- download.sh
+git stash push -m "p2-fail-smoke" -- cu/runtime/download.py
 cu run https://github.com/kelseyhightower/nocode/archive/refs/heads/master.zip --job-id fail-001
 cu show fail-001
 git stash pop

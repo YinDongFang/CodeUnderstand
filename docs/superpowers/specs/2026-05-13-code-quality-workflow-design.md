@@ -8,11 +8,11 @@
 ### 1.1 目标
 
 - 在 **Ubuntu** 上单机部署：从 git 拉取本仓库后 **同一进程** 提供编排服务与 Web UI（浏览器访问本机端口）。
-- **Python** 负责流程编排、状态持久化、API 与 UI；**细粒度稳定操作**（下载、解压、打包、复制等）继续由 **bash** 脚本承担，必要时为编排层增加薄封装脚本。
+- **Python** 负责流程编排、状态持久化、API 与 UI；**下载、解压、打包、会话处理等**由 **`cu.runtime.*` / `cu.pipeline.*`** 以标准库为主实现（**仓库内除 `install.sh` 外无其它 `.sh`**）。
 - **不兼容 Windows**；开发与生产均以 Linux 为准。
 - 支持 **多作业并行**；每作业 **独立假 `$HOME`（沙箱）**，避免 `~/.claude` 与产物路径冲突。  
 - **作业与 repo 1:1**：同一时刻 **不会** 存在多个作业指向同一 `repo`（同一 `code-understand-{repo}` 语义）；并行仅发生在 **不同 repo 的不同作业** 之间。沙箱仍保留，用于进程与路径隔离。
-- **dispatch 平台**：当前 **不接真实 API**；仅 **stub** 字段占位，输入仍以 **GitHub archive ZIP URL** 为主（与现有 `run.sh` 输入一致）。
+- **dispatch 平台**：当前 **不接真实 API**；仅 **stub** 字段占位，输入仍以 **GitHub archive ZIP URL** 为主（与 **`cu run`** / **`cu.pipeline.run_github_zip`** 输入一致）。
 - **rewrite** 与 **会话导出** 合并为同一宏阶段内的先后步骤；隔离后 **只维护一份会话 JSONL 真源**，导出在 rewrite 通过之后 **一次性** 写入产物树。
 - 支持从某一宏阶段 **重跑**；通过 **快照** 恢复「进入该阶段前」的磁盘状态（见第 6 节）。
 - 提供 **删除作业**：终止进程并删除沙箱、快照及元数据。
@@ -29,7 +29,7 @@
 - 每作业 `job_id` 对应独立目录，其下 **`home/` 作为该作业的假 `$HOME`**（`HOME=$PWD/.../home`）。
 - **并行隔离**：所有依赖 `~/.claude` 的工具均落在该假 `$HOME` 下。
 - **bootstrap**：从真实用户 `~/.claude` **复制**配置/凭据等（具体文件列表实现时按 Claude Code 实际结构维护）；**不得**链接或复制真实机的 **`projects/`** 到沙箱（避免与真机或其它作业共享会话）。沙箱内 `projects/` 为空或仅本作业生长。
-- **子进程环境**：默认 **继承**编排服务进程的环境（`PATH`、`ANTHROPIC_*` 等），再 **显式覆盖** `HOME` 及下文作业级变量；启动前 **自检**（`claude`、`python3`、`bash` 等）。
+- **子进程环境**：默认 **继承**编排服务进程的环境（`PATH`、`ANTHROPIC_*` 等），再 **显式覆盖** `HOME` 及下文作业级变量；启动前 **自检**（`claude`、`python3` 等）。
 
 ---
 
@@ -45,7 +45,7 @@
 
 ### 3.2 运行期文件（不得进入上述产物根）
 
-- 日志、`loop_logs`、`tmp`（**非** rewrite 题库：题目真源仅为沙箱内 **单份** session JSONL；Web UI **`GET`** 对该文件即时解析，**保存**直接写回，不落 `$HOME/tmp/` 题面稿）、`agent-{repo}` 副本等，**一律直接放在假 `$HOME` 下固定子路径**（如 `$HOME/logs/`、`$HOME/loop_logs/`、`$HOME/tmp/`、`$HOME/agent-{repo}/` 等，实现时统一常量），**不采用**单独抽象 `CODE_UNDERSTAND_STATE_ROOT` 指向真实用户 `~/Documents` 等与真机家目录挂钩的方案。  
+- 日志、`loop_logs`、`tmp`（**非** rewrite 题库：题目真源仅为沙箱内 **单份** session JSONL；Web UI **`GET`** 对该文件即时解析，**保存**直接写回，不落 `$HOME/tmp/` 题面稿）、`agent-{repo}` 副本等，**一律直接放在假 `$HOME` 下固定子路径**（如 `$HOME/logs/`、`$HOME/loop_logs/`、`$HOME/tmp/`、`$HOME/agent-{repo}/` 等，实现时统一常量）。**编排路径**下 `CODE_UNDERSTAND_STATE_ROOT` 由 `stage_env` 指向该假 `$HOME`**。本地 CLI 未显式设置时，默认以**用户主目录**为运行态根（**不使用** macOS「文档」目录等专用路径）。  
 - **作业根目录** 本身位于 **平台运行时数据根**（见 §3.4）下，与本仓库 git 工作树相互独立。  
 - **快照归档**（全量 tar 文件）放在 **假 `$HOME` 之外**（作业根目录下 `snapshots/`，见 §3.4 与第 6 节），避免 tar 整树时自包含。
 
@@ -71,25 +71,25 @@
 
 ## 4. 宏阶段（合并后共 4 段）
 
-为 **减少快照次数与磁盘占用**，将原细阶段合并为 **4 个宏阶段**。编排器对外以宏阶段为粒度展示状态、触发运行与重跑；**内部**仍可顺序调用多个 bash/Python 步骤。
+为 **减少快照次数与磁盘占用**，将原细阶段合并为 **4 个宏阶段**。编排器对外以宏阶段为粒度展示状态、触发运行与重跑；**内部**顺序调用 **Python 模块**（及 **Claude/mock 子进程**）。历史 bash 脚本已移除，详见 **`2026-05-13-shell-to-python-design.md`**。
 
 | 序号 | 宏阶段 ID | 包含的原子能力（概念上） | 说明 |
 |------|-----------|---------------------------|------|
 | 1 | `bootstrap` | 沙箱初始化（含从真机复制 `.claude` 配置等）+ 从 URL 下载/解压到最终 `code/...` | 产物树开始出现代码 |
-| 2 | `conversation` | 等价原 `loop.sh` 多轮对话 + 在最终代码目录上生成 `doc/`（会话仍在沙箱 `.claude`；**此时尚不把** `session.jsonl` 复制到 `sessions/`） | 会话与 doc 就绪 |
-| 3 | `compile` | 生成 `metadata.json`、占位 `questions.json`、`classify` 等 + **clean** 清理 `.DS_Store`、`__MACOSX` 等不应提交的文件 | 交付树元数据就绪且代码树已清理 |
-| 4 | `build` | **rewrite**（只改一份会话真源）→ **一次性导出**到 `sessions/session1/session.jsonl` → **zip** 整个 `code-understand-{repo}/` | 最终 zip；**注意**：宏阶段名 `build` 与仓库内现有 `build.sh` 不是同一概念；本阶段结束后 **不打快照** |
+| 2 | `conversation` | **`cu.pipeline.loop`** 多轮对话 + **`cu.pipeline.build_docs`** 在代码目录生成 `doc/`（会话仍在沙箱 `.claude`；**此时尚不把** `session.jsonl` 复制到 `sessions/`） | 会话与 doc 就绪 |
+| 3 | `compile` | **`cu.pipeline.metadata`**、**`cu.pipeline.clean_artifacts`**、`classify` 等 + 清理不应提交的文件 | 交付树元数据就绪且代码树已清理 |
+| 4 | `build` | **rewrite**（只改一份会话真源）→ **`cu.pipeline.export_session`** → **`cu.runtime.archive.archive`** | 最终 zip；宏阶段名 **`build`** 与 CLI 模块名 `build_docs` 不同；本阶段结束后 **不打快照** |
 
 **宏阶段 ID 拼写**：对外常量使用英文 **`conversation`**（非 `converstaion`）。
 
-**实现注意**：现有 `run.sh` / `build.sh` / `pack.sh` / `rewrite.py` 需按本规格 **拆分或改参**；不在本文展开具体 diff。
+**实现注意**：本地离线「非编排器」打包与一条龙见 **`cu.pipeline.pack`** / **`cu.pipeline.run_github_zip`**；规格与 CLI 清册见 **`2026-05-13-shell-to-python-design.md`**。
 
 ---
 
 ## 5. rewrite 与单一会话
 
 - **隔离后**：rewrite **只对应一份**会话 JSONL（沙箱 `.claude/projects/...` 下与 `SESSION_ID` 对应文件）；题目列表 **`GET`** 时对其实时解析；人工编辑 **`PUT`/保存即写回**，**不设**题库用的临时磁盘文件（如 `$HOME/tmp/` 独立题面稿）。
-- **导出**：在上述会话内容确定后，`build` 宏阶段在同一次运行中顺序执行 **会话规整（如 `rewrite.py` 或等价内联写入）→ 导出 → zip**，将树写入 **`$HOME/code-understand-{repo}/sessions/session1/session.jsonl`**（及所需子目录）并打包。
+- **导出**：在上述会话内容确定后，`build` 宏阶段在同一次运行中顺序执行 **`cu.pipeline.rewrite`（或 Web/API 等价 stdin-lines 路径）→ `cu.pipeline.export_session` → `cu.runtime.archive.archive`**，将树写入 **`$HOME/code-understand-{repo}/sessions/session1/session.jsonl`**（及所需子目录）并打包。
 - **再次修改**：若在导出后仍需改题目或重出包，须 **重跑 `build` 宏阶段整段**（恢复至 `post-compile` 再打完整 `build`），**不支持**在同一 `build` 执行实例内做多轮 rewrite/反复 apply；不自动回滚更早宏阶段，除非用户显式 **rerun** 某前缀阶段。
 
 ---

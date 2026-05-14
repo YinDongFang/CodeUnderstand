@@ -29,6 +29,7 @@ def client(tmp_path, monkeypatch):
         orch._ACTIVE.clear()
     with eve._lock:
         eve._Subscribers.clear()
+    monkeypatch.setenv("CU_JOB_WORKER_INLINE", "1")
     return TestClient(create_app())
 
 

@@ -1,7 +1,14 @@
-"""rewrite.py 新 flag 的烟雾测试。"""
+"""cu.pipeline.rewrite CLI flag 烟雾测试。"""
 import os
 import subprocess
 import sys
+
+
+def _rewrite_env(repo_root: str) -> dict[str, str]:
+    env = dict(os.environ)
+    prev = env.get("PYTHONPATH", "").strip()
+    env["PYTHONPATH"] = repo_root if not prev else f"{repo_root}{os.pathsep}{prev}"
+    return env
 
 
 def test_non_interactive_missing_tmp_returns_error(tmp_path, monkeypatch):
@@ -45,12 +52,13 @@ def test_non_interactive_missing_tmp_returns_error(tmp_path, monkeypatch):
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     proc = subprocess.run(
-        [sys.executable, os.path.join(repo_root, "rewrite.py"),
+        [sys.executable, "-m", "cu.pipeline.rewrite",
          repo, "--single-source", "--non-interactive"],
         capture_output=True, text=True, timeout=30,
-        env={**os.environ},
+        cwd=repo_root,
+        env=_rewrite_env(repo_root),
     )
-    # rewrite.py 会先创建 tmp 文件（dump_questions_to_tmp），然后在 --non-interactive
+    # cu.pipeline.rewrite 会先创建 tmp 文件（dump_questions_to_tmp），然后在 --non-interactive
     # 分支重新检查；初次会成功 dump，因此 tmp 文件其实会存在。
     # 测试断言：流程能正常运行到非交互分支并以 returncode in {0,1} 结束（不抛异常、不开 gedit）。
     assert proc.returncode in (0, 1), f"stderr: {proc.stderr}"
@@ -89,10 +97,11 @@ def test_non_interactive_writes_back_single_source(tmp_path, monkeypatch):
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     proc = subprocess.run(
-        [sys.executable, os.path.join(repo_root, "rewrite.py"),
+        [sys.executable, "-m", "cu.pipeline.rewrite",
          repo, "--single-source", "--non-interactive"],
         capture_output=True, text=True, timeout=30,
-        env={**os.environ},
+        cwd=repo_root,
+        env=_rewrite_env(repo_root),
     )
     assert proc.returncode == 0, (
         f"exit={proc.returncode}\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
@@ -134,7 +143,7 @@ def test_stdin_lines_non_interactive_writes_back(tmp_path, monkeypatch):
     proc = subprocess.run(
         [
             sys.executable,
-            os.path.join(repo_root, "rewrite.py"),
+            "-m", "cu.pipeline.rewrite",
             repo,
             "--single-source",
             "--non-interactive",
@@ -143,9 +152,10 @@ def test_stdin_lines_non_interactive_writes_back(tmp_path, monkeypatch):
         input=payload,
         capture_output=True,
         timeout=30,
-        env={**os.environ},
+        cwd=repo_root,
+        env=_rewrite_env(repo_root),
     )
-    assert proc.returncode == 0, proc.stderr.decode()
+    assert proc.returncode == 0, proc.stderr
     final = src.read_text(encoding="utf-8")
     assert new_q in final
     assert original_q not in final

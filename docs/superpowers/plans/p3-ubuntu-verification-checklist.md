@@ -88,7 +88,7 @@ curl -s http://127.0.0.1:8765/api/v1/jobs/$JOB_ID/rewrite/questions | jq
 curl -s -X POST http://127.0.0.1:8765/api/v1/jobs/$JOB_ID/stages/build/run
 ```
 
-预期：**compile 未完成** 时 **GET/PUT rewrite** 返回 **409**。经 **API** 跑的 **build** 在 **export+zip** 前会跑一次 **`rewrite.py --stdin-lines`**（stdin 为当前题目，常为幂等等同写回）。**再改题目并出包** → 再次 **PUT** 后 **`rerun build`**。
+预期：**compile 未完成** 时 **GET/PUT rewrite** 返回 **409**。经 **API** 跑的 **build** 在 **export+zip** 前会跑一次 **`cu.pipeline.rewrite` stdin-lines**（stdin 为当前题目，常为幂等等同写回）。**再改题目并出包** → 再次 **PUT** 后 **`rerun build`**。
 
 zip 就绪后：**`GET /api/v1/jobs/{id}/artifacts/zip`** 或 **`JobDTO.artifact_zip_path`** 指明路径。
 

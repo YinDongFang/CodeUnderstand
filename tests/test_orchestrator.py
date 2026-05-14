@@ -18,6 +18,7 @@ def db_env(tmp_path, monkeypatch):
     (tmp_path / "home").mkdir()
     (tmp_path / "home" / ".claude").mkdir()
     orch.ensure_db()
+    monkeypatch.setenv("CU_JOB_WORKER_INLINE", "1")
     with orch._ACTIVE_LOCK:
         orch._ACTIVE.clear()
     return tmp_path

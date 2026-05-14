@@ -59,7 +59,7 @@ def _latest_activity_mtime(project_dir: str) -> float:
 
 
 def normalize_repo_for_claude_projects_path(target: str) -> str:
-    """Claude 项目目录名中 repo 段的下划线需为短横线，与 build.sh / loop.sh 一致。"""
+    """Claude 项目目录名中 repo 段的下划线需为短横线，与 ``cu.pipeline.loop`` / ``cu.pipeline.build_docs`` 一致。"""
     return (target or "").replace("_", "-")
 
 
@@ -867,7 +867,9 @@ def delete_session_turns(
 # CLI 入口
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main_cli(argv: list[str] | None = None) -> int:
+    import argparse
+
     ap = argparse.ArgumentParser(
         description="按 target 定位项目目录，对指定 session 的 JSONL 清理重复对话轮次"
     )
@@ -879,7 +881,7 @@ if __name__ == "__main__":
         "session_id",
         help="该目录下的会话文件名（UUID），对应 {session_id}.jsonl，可省略 .jsonl 后缀",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     target = (args.target or "").strip()
     if not target:
         ap.error("target 不能为空")
@@ -890,10 +892,10 @@ if __name__ == "__main__":
         summary = run_dedupe_session(target, session_id)
     except FileNotFoundError as e:
         print(f"错误: {e}")
-        raise SystemExit(1)
+        return 1
     except Exception as e:
         print(f"错误: {e}")
-        raise SystemExit(1)
+        return 1
     print(f"总对话轮数: {summary.get('total_turns', 0)}")
     print(f"项目目录: {summary.get('project_dir', '')}")
     print(f"session_id: {summary.get('session_id', '')}")
@@ -901,3 +903,8 @@ if __name__ == "__main__":
     print(summary.get("message", ""))
     if summary.get("deleted", 0):
         print(f"已删除轮次索引: {summary.get('turn_indices', [])}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main_cli())
