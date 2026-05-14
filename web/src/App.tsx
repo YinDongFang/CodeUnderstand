@@ -2,11 +2,13 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   createTask,
   fetchLogs,
+  fetchOpsSettings,
   fetchTask,
   fetchTasks,
   fetchWorkflows,
   resolveInterrupt,
   rerunTask,
+  saveOpsSettings,
   type TaskDetail,
   type TaskNode,
   type TaskSummary,
@@ -268,6 +270,7 @@ export default function App() {
   const [nowTick, setNowTick] = useState(() => Date.now())
 
   const [modalOpen, setModalOpen] = useState(false)
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
   const [workflowsLoading, setWorkflowsLoading] = useState(false)
   const [workflowsErr, setWorkflowsErr] = useState<string | null>(null)
   const [workflowOptions, setWorkflowOptions] = useState<WorkflowInfo[]>([])
@@ -278,6 +281,12 @@ export default function App() {
   const [createBusy, setCreateBusy] = useState(false)
   const [rerunBusyNodeId, setRerunBusyNodeId] = useState<string | null>(null)
   const [nodeActionErr, setNodeActionErr] = useState<string | null>(null)
+
+  const [opsCookieDraft, setOpsCookieDraft] = useState('')
+  const [opsAuthDraft, setOpsAuthDraft] = useState('')
+  const [settingsLoadErr, setSettingsLoadErr] = useState<string | null>(null)
+  const [settingsSaveErr, setSettingsSaveErr] = useState<string | null>(null)
+  const [settingsBusy, setSettingsBusy] = useState(false)
 
   const detailHasActiveNode =
     detail?.nodes.some(
@@ -400,6 +409,29 @@ export default function App() {
   }, [modalOpen])
 
   useEffect(() => {
+    if (!settingsModalOpen) return
+    let cancelled = false
+    setSettingsLoadErr(null)
+    setSettingsSaveErr(null)
+    setSettingsBusy(true)
+    fetchOpsSettings()
+      .then((o) => {
+        if (cancelled) return
+        setOpsCookieDraft(o.cookie)
+        setOpsAuthDraft(o.authorization)
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setSettingsLoadErr(e.message)
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsBusy(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [settingsModalOpen])
+
+  useEffect(() => {
     if (!modalOpen) return
     const wf = workflowOptions.find((w) => w.key === newWorkflowKey)
     const fields = parseInputSchema(wf?.input_schema ?? null)
@@ -480,6 +512,24 @@ export default function App() {
     [detail, selectedId],
   )
 
+  const onSubmitOpsSettings = async () => {
+    setSettingsSaveErr(null)
+    setSettingsBusy(true)
+    try {
+      const saved = await saveOpsSettings({
+        cookie: opsCookieDraft,
+        authorization: opsAuthDraft,
+      })
+      setOpsCookieDraft(saved.cookie)
+      setOpsAuthDraft(saved.authorization)
+      setSettingsModalOpen(false)
+    } catch (e) {
+      setSettingsSaveErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSettingsBusy(false)
+    }
+  }
+
   const selectedWorkflow = workflowOptions.find((w) => w.key === newWorkflowKey)
   const inputFields = parseInputSchema(selectedWorkflow?.input_schema ?? null)
 
@@ -540,9 +590,18 @@ export default function App() {
           <aside className="pane left">
             <div className="left-head">
               <h2 className="left-title">任务</h2>
-              <button type="button" className="primary btn-sm" onClick={openCreateModal}>
-                新建任务
-              </button>
+              <div className="left-head-actions">
+                <button
+                  type="button"
+                  className="ghost-btn btn-sm"
+                  onClick={() => setSettingsModalOpen(true)}
+                >
+                  设置
+                </button>
+                <button type="button" className="primary btn-sm" onClick={openCreateModal}>
+                  新建任务
+                </button>
+              </div>
             </div>
             {tasksErr && <p className="err">{tasksErr}</p>}
             <ul className="task-list">
@@ -751,6 +810,73 @@ export default function App() {
           </main>
         </div>
       </div>
+
+      {settingsModalOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="全局设置">
+          <div className="modal">
+            <header className="modal-header">
+              <h3>全局 Ops 设置</h3>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => setSettingsModalOpen(false)}
+              >
+                关闭
+              </button>
+            </header>
+            <div className="modal-body">
+              <p className="muted small">
+                与任务 context 分库存储；每次 <code className="mono">run_once</code> 入口读取并注入{' '}
+                <code className="mono">NodeContext.ops_globals</code>。
+              </p>
+              {settingsLoadErr && <p className="err">{settingsLoadErr}</p>}
+              <label className="lbl" htmlFor="ops-cookie">
+                Cookie（可多行）
+              </label>
+              <textarea
+                id="ops-cookie"
+                className="textarea"
+                rows={5}
+                spellCheck={false}
+                value={opsCookieDraft}
+                onChange={(e) => setOpsCookieDraft(e.target.value)}
+                disabled={settingsBusy}
+              />
+              <label className="lbl" htmlFor="ops-auth">
+                Authorization（可多行）
+              </label>
+              <textarea
+                id="ops-auth"
+                className="textarea"
+                rows={5}
+                spellCheck={false}
+                autoComplete="off"
+                value={opsAuthDraft}
+                onChange={(e) => setOpsAuthDraft(e.target.value)}
+                disabled={settingsBusy}
+              />
+              {settingsSaveErr && <p className="err">{settingsSaveErr}</p>}
+            </div>
+            <footer className="modal-footer">
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => setSettingsModalOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={settingsBusy}
+                onClick={() => void onSubmitOpsSettings()}
+              >
+                {settingsBusy ? '保存中…' : '保存'}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {modalOpen && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="新建任务">

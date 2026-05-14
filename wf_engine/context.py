@@ -16,3 +16,4 @@ class NodeContext:
     human_input: dict[str, Any] | None
     input: dict[str, Any]
     context: dict[str, Any]
+    ops_globals: dict[str, str]

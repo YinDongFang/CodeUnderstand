@@ -198,6 +198,37 @@ def test_apply_resolve_accumulates_interrupt_wall_and_bumps_exec(tmp_path: Path)
     assert row["execution_count"] == 2
 
 
+def test_ops_globals_default_empty(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    assert store.get_ops_globals() == {"cookie": "", "authorization": ""}
+
+
+def test_ops_globals_roundtrip(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    store.set_ops_globals("a=b", "Bearer x")
+    assert store.get_ops_globals() == {"cookie": "a=b", "authorization": "Bearer x"}
+    store.set_ops_globals("", "")
+    assert store.get_ops_globals() == {"cookie": "", "authorization": ""}
+
+
+def test_ops_globals_corrupt_json_falls_back_to_empty(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    from wf_engine.store.sqlite import OPS_GLOBALS_KEY
+
+    with store.connect() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO settings (key, value_json) VALUES (?, ?)",
+            (OPS_GLOBALS_KEY, "not-json"),
+        )
+    assert store.get_ops_globals() == {"cookie": "", "authorization": ""}
+
+
 def test_second_open_interrupt_flushes_pending_segment(tmp_path: Path) -> None:
     import time
 

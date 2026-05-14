@@ -80,6 +80,11 @@ export type LogsResponse = {
   next_cursor: number
 }
 
+export type OpsGlobals = {
+  cookie: string
+  authorization: string
+}
+
 export function fetchTasks(): Promise<TaskSummary[]> {
   return fetch(`${BASE}/tasks`).then((r) => parseJson<TaskSummary[]>(r))
 }
@@ -99,6 +104,18 @@ export function fetchLogs(taskId: string, cursor: number): Promise<LogsResponse>
 
 export function fetchWorkflows(): Promise<WorkflowInfo[]> {
   return fetch(`${BASE}/workflows`).then((r) => parseJson<WorkflowInfo[]>(r))
+}
+
+export function fetchOpsSettings(): Promise<OpsGlobals> {
+  return fetch(`${BASE}/settings/ops`).then((r) => parseJson<OpsGlobals>(r))
+}
+
+export function saveOpsSettings(body: OpsGlobals): Promise<OpsGlobals> {
+  return fetch(`${BASE}/settings/ops`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => parseJson<OpsGlobals>(r))
 }
 
 export function createTask(body: {

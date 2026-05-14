@@ -10,7 +10,7 @@ from wf_engine.engine import Engine
 from wf_engine.store.sqlite import SqliteStore
 from wf_engine.supervisor import spawn_worker
 
-from wf_engine.server import routes_tasks
+from wf_engine.server import routes_settings, routes_tasks
 from wf_engine.server.state import ControlPlaneState
 
 
@@ -48,4 +48,5 @@ def create_app(
         spawn_worker_fn=spawn_worker_fn or spawn_worker,
     )
     app.include_router(routes_tasks.router)
+    app.include_router(routes_settings.router)
     return app

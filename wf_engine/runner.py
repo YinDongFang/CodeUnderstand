@@ -55,6 +55,8 @@ def run_once(
     layout.workspace.mkdir(parents=True, exist_ok=True)
     layout.zips.mkdir(parents=True, exist_ok=True)
 
+    ops_snapshot = store.get_ops_globals()
+
     pid = worker_pid if worker_pid is not None else os.getpid()
     _append_task_log_line(
         task_root,
@@ -134,6 +136,7 @@ def run_once(
             human_input=human_input,
             input=snapshot_input,
             context=shared_context,
+            ops_globals=ops_snapshot,
         )
         injected_human = human_input is not None
 

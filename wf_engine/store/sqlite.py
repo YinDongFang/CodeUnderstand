@@ -11,6 +11,8 @@ from typing import Any, Iterator
 from wf_engine import status as S
 from wf_engine.lease_util import parse_utc_iso, pid_alive
 
+OPS_GLOBALS_KEY = "ops_globals"
+
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -88,6 +90,10 @@ class SqliteStore:
                     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_task_nodes_task ON task_nodes(task_id);
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value_json TEXT NOT NULL
+                );
                 """
             )
             self._migrate_tasks_table(c)
@@ -131,6 +137,39 @@ class SqliteStore:
                 """UPDATE tasks SET waiting_human_since = updated_at
                    WHERE status = ? AND (waiting_human_since IS NULL OR waiting_human_since = '')""",
                 (S.TASK_WAITING_HUMAN,),
+            )
+
+    @staticmethod
+    def _empty_ops_globals() -> dict[str, str]:
+        return {"cookie": "", "authorization": ""}
+
+    def get_ops_globals(self) -> dict[str, str]:
+        empty = self._empty_ops_globals()
+        with self.connect() as c:
+            row = c.execute(
+                "SELECT value_json FROM settings WHERE key=?",
+                (OPS_GLOBALS_KEY,),
+            ).fetchone()
+        if row is None:
+            return dict(empty)
+        try:
+            raw = _loads(row["value_json"])
+        except json.JSONDecodeError:
+            return dict(empty)
+        if not isinstance(raw, dict):
+            return dict(empty)
+        return {
+            "cookie": str(raw.get("cookie") or ""),
+            "authorization": str(raw.get("authorization") or ""),
+        }
+
+    def set_ops_globals(self, cookie: str, authorization: str) -> None:
+        payload = _dumps({"cookie": cookie, "authorization": authorization})
+        with self.connect() as c:
+            c.execute(
+                """INSERT INTO settings (key, value_json) VALUES (?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json""",
+                (OPS_GLOBALS_KEY, payload),
             )
 
     def create_task(
