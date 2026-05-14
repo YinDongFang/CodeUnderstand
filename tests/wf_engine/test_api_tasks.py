@@ -217,17 +217,3 @@ def test_interrupt_resolve_roundtrip(tmp_path: Path):
             assert done.json()["status"] == S.TASK_SUCCEEDED
 
     asyncio.run(_run())
-
-
-def test_rerun_returns_501(api_setup):
-    app = api_setup["app"]
-
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.post("/tasks", json={"workflow_key": "api_wf", "input": {}})
-            task_id = r.json()["task_id"]
-            resp = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "step1"})
-            assert resp.status_code == 501
-
-    asyncio.run(_run())

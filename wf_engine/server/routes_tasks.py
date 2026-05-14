@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -11,6 +12,7 @@ from pydantic import BaseModel, Field
 from wf_engine import status as S
 from wf_engine.paths import task_layout
 from wf_engine.server.state import ControlPlaneState
+from wf_engine.unzip_util import UnsafeArchiveError, extract_zip_safely
 
 router = APIRouter()
 
@@ -29,6 +31,10 @@ class ResolveInterruptBody(BaseModel):
     payload: dict[str, Any]
 
 
+class RerunBody(BaseModel):
+    from_node_id: str
+
+
 class LogsResponse(BaseModel):
     lines: list[str]
     next_cursor: int
@@ -40,6 +46,17 @@ def _cp(request: Request) -> ControlPlaneState:
 
 def _err(code: str, message: str) -> dict[str, Any]:
     return {"error": {"code": code, "message": message}}
+
+
+def _clear_workspace_contents(workspace: Path) -> None:
+    if not workspace.exists():
+        workspace.mkdir(parents=True, exist_ok=True)
+        return
+    for child in workspace.iterdir():
+        if child.is_file() or child.is_symlink():
+            child.unlink(missing_ok=True)
+        elif child.is_dir():
+            shutil.rmtree(child)
 
 
 def _task_root(cp: ControlPlaneState, task_id: str) -> Path:
@@ -214,9 +231,58 @@ def resolve_interrupt(request: Request, task_id: str, body: ResolveInterruptBody
     return {"status": "accepted"}
 
 
-@router.post("/tasks/{task_id}/rerun")
-def rerun_stub(task_id: str) -> None:
-    raise HTTPException(
-        status_code=501,
-        detail=_err("not_implemented", f"rerun for task {task_id} is not implemented yet"),
-    )
+@router.post("/tasks/{task_id}/rerun", status_code=202)
+def rerun_task(request: Request, task_id: str, body: RerunBody) -> dict[str, str]:
+    cp = _cp(request)
+    row = cp.store.get_task(task_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=_err("not_found", "task not found"))
+    if row["status"] == S.TASK_WAITING_HUMAN:
+        raise HTTPException(
+            status_code=409,
+            detail=_err(
+                "invalid_task_status",
+                "cannot rerun while task is waiting for human input",
+            ),
+        )
+
+    from_ordinal: int | None = None
+    for n in cp.store.list_nodes(task_id):
+        if n["node_id"] == body.from_node_id:
+            from_ordinal = int(n["ordinal"])
+            break
+    if from_ordinal is None:
+        raise HTTPException(
+            status_code=404,
+            detail=_err(
+                "unknown_node",
+                f"from_node_id not found for this task: {body.from_node_id!r}",
+            ),
+        )
+
+    snapshots = cp.store.list_zip_snapshots_before_node(task_id, from_ordinal)
+    for _, zip_path in snapshots:
+        if not Path(zip_path).is_file():
+            raise HTTPException(
+                status_code=409,
+                detail=_err("missing_snapshot", f"snapshot zip missing on disk: {zip_path}"),
+            )
+
+    layout = task_layout(_task_root(cp, task_id))
+    _clear_workspace_contents(layout.workspace)
+
+    try:
+        for _, zip_path in snapshots:
+            extract_zip_safely(Path(zip_path).read_bytes(), layout.workspace)
+    except UnsafeArchiveError as e:
+        cp.store.set_task_status(task_id, S.TASK_FAILED)
+        raise HTTPException(
+            status_code=409,
+            detail=_err("unsafe_archive", str(e)),
+        ) from e
+
+    cp.store.reset_nodes_from_ordinal(task_id, from_ordinal)
+    cp.store.release_lease(task_id)
+    cp.store.prepare_task_for_rerun_execution(task_id)
+    _spawn_for_task(cp, task_id=task_id, workflow_key=row["workflow_key"])
+    return {"status": "accepted"}

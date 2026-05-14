@@ -155,6 +155,43 @@ class SqliteStore:
                     (task_id, nid, ord_, S.NODE_PENDING),
                 )
 
+    def list_zip_snapshots_before_node(
+        self, task_id: str, from_ordinal: int
+    ) -> list[tuple[int, str]]:
+        """Successful predecessors with on-disk zips, ordered by ordinal (< from_ordinal)."""
+        with self.connect() as c:
+            rows = c.execute(
+                """
+                SELECT ordinal, zip_path FROM task_nodes
+                WHERE task_id=? AND ordinal<? AND status=? AND zip_path IS NOT NULL
+                ORDER BY ordinal ASC
+                """,
+                (task_id, from_ordinal, S.NODE_SUCCESS),
+            ).fetchall()
+        return [(int(r["ordinal"]), str(r["zip_path"])) for r in rows]
+
+    def reset_nodes_from_ordinal(self, task_id: str, from_ordinal: int) -> None:
+        with self.connect() as c:
+            c.execute(
+                """UPDATE task_nodes SET status=?, started_at=NULL, finished_at=NULL,
+                   zip_path=NULL, error_json=NULL
+                   WHERE task_id=? AND ordinal>=?""",
+                (S.NODE_PENDING, task_id, from_ordinal),
+            )
+
+    def prepare_task_for_rerun_execution(self, task_id: str) -> None:
+        now = _utc_iso()
+        with self.connect() as c:
+            c.execute(
+                """UPDATE tasks SET status=?, updated_at=?,
+                   worker_generation=worker_generation+1,
+                   interrupt_node_id=NULL, interrupt_expected_schema=NULL,
+                   interrupt_request_extras=NULL, interrupt_checkpoint=NULL,
+                   interrupt_response_payload=NULL, interrupt_response_consumed=0
+                   WHERE id=?""",
+                (S.TASK_RUNNING, now, task_id),
+            )
+
     def list_nodes(self, task_id: str) -> list[dict[str, Any]]:
         with self.connect() as c:
             rows = c.execute(
