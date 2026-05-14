@@ -176,6 +176,7 @@ class SqliteStore:
         status: str | None = None,
         started_at: str | None = None,
         finished_at: str | None = None,
+        clear_finished_at: bool = False,
         zip_path: str | None = None,
         error_json: dict | None = None,
     ) -> None:
@@ -187,7 +188,9 @@ class SqliteStore:
         if started_at is not None:
             sets.append("started_at=?")
             vals.append(started_at)
-        if finished_at is not None:
+        if clear_finished_at:
+            sets.append("finished_at=NULL")
+        elif finished_at is not None:
             sets.append("finished_at=?")
             vals.append(finished_at)
         if zip_path is not None:
@@ -254,6 +257,14 @@ class SqliteStore:
                 interrupt_response_consumed=0, status=?, updated_at=?,
                 worker_generation=worker_generation+1 WHERE id=?""",
                 (_dumps(payload), S.TASK_RUNNING, now, task_id),
+            )
+
+    def consume_interrupt_response(self, task_id: str) -> None:
+        with self.connect() as c:
+            c.execute(
+                """UPDATE tasks SET interrupt_response_consumed=1,
+                interrupt_response_payload=NULL, updated_at=? WHERE id=?""",
+                (_utc_iso(), task_id),
             )
 
     def acquire_lease(self, task_id: str, pid: int, lease_until: str) -> None:
