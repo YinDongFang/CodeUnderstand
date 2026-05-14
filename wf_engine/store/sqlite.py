@@ -70,7 +70,10 @@ class SqliteStore:
                     interrupt_response_consumed INTEGER NOT NULL DEFAULT 0,
                     worker_pid INTEGER,
                     lease_until TEXT,
-                    worker_generation INTEGER NOT NULL DEFAULT 0
+                    worker_generation INTEGER NOT NULL DEFAULT 0,
+                    execution_count INTEGER NOT NULL DEFAULT 0,
+                    interrupt_wall_seconds_accumulated INTEGER NOT NULL DEFAULT 0,
+                    waiting_human_since TEXT
                 );
                 CREATE TABLE IF NOT EXISTS task_nodes (
                     task_id TEXT NOT NULL,
@@ -91,13 +94,25 @@ class SqliteStore:
 
     @staticmethod
     def _migrate_tasks_table(c: sqlite3.Connection) -> None:
-        cols = [str(r[1]) for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
-        if "name" not in cols:
+        cols_before = [str(r[1]) for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "name" not in cols_before:
             c.execute("ALTER TABLE tasks ADD COLUMN name TEXT")
-        if "context_json" not in cols:
+        if "context_json" not in cols_before:
             c.execute(
                 "ALTER TABLE tasks ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'"
             )
+        added_exec = False
+        if "execution_count" not in cols_before:
+            c.execute(
+                "ALTER TABLE tasks ADD COLUMN execution_count INTEGER NOT NULL DEFAULT 0"
+            )
+            added_exec = True
+        if "interrupt_wall_seconds_accumulated" not in cols_before:
+            c.execute(
+                "ALTER TABLE tasks ADD COLUMN interrupt_wall_seconds_accumulated INTEGER NOT NULL DEFAULT 0"
+            )
+        if "waiting_human_since" not in cols_before:
+            c.execute("ALTER TABLE tasks ADD COLUMN waiting_human_since TEXT")
         # One non-null name per task (multiple NULL names allowed).
         c.execute(
             """
@@ -106,6 +121,17 @@ class SqliteStore:
             WHERE name IS NOT NULL
             """
         )
+        if added_exec:
+            c.execute(
+                """UPDATE tasks SET execution_count = 1
+                   WHERE execution_count = 0 AND status != ?""",
+                (S.TASK_PENDING,),
+            )
+            c.execute(
+                """UPDATE tasks SET waiting_human_since = updated_at
+                   WHERE status = ? AND (waiting_human_since IS NULL OR waiting_human_since = '')""",
+                (S.TASK_WAITING_HUMAN,),
+            )
 
     def create_task(
         self,
@@ -128,8 +154,9 @@ class SqliteStore:
                      created_at, updated_at, interrupt_seq, interrupt_node_id,
                      interrupt_expected_schema, interrupt_request_extras, interrupt_checkpoint,
                      interrupt_response_payload, interrupt_response_consumed,
-                     worker_pid, lease_until, worker_generation)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,0,NULL,NULL,NULL,NULL,NULL,0,NULL,NULL,0)""",
+                     worker_pid, lease_until, worker_generation,
+                     execution_count, interrupt_wall_seconds_accumulated, waiting_human_since)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,0,NULL,NULL,NULL,NULL,NULL,0,NULL,NULL,0,0,0,NULL)""",
                 (
                     tid,
                     workflow_key,
@@ -144,6 +171,13 @@ class SqliteStore:
                 ),
             )
         return tid
+
+    def mark_first_run_scheduled(self, task_id: str) -> None:
+        with self.connect() as c:
+            c.execute(
+                "UPDATE tasks SET execution_count = 1 WHERE id=? AND execution_count = 0",
+                (task_id,),
+            )
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
         with self.connect() as c:
@@ -225,6 +259,7 @@ class SqliteStore:
             c.execute(
                 """UPDATE tasks SET status=?, updated_at=?,
                    worker_generation=worker_generation+1,
+                   execution_count=execution_count+1,
                    interrupt_seq=0,
                    interrupt_node_id=NULL, interrupt_expected_schema=NULL,
                    interrupt_request_extras=NULL, interrupt_checkpoint=NULL,
@@ -352,8 +387,28 @@ class SqliteStore:
         checkpoint: dict | None,
     ) -> int:
         now = _utc_iso()
+        now_dt = parse_utc_iso(now)
         with self.connect() as c:
             c.execute("BEGIN IMMEDIATE")
+            row = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if row is None:
+                c.execute("ROLLBACK")
+                raise KeyError(task_id)
+            add = 0
+            if row["status"] == S.TASK_WAITING_HUMAN and row["waiting_human_since"]:
+                try:
+                    add = max(
+                        0,
+                        int(
+                            (
+                                now_dt
+                                - parse_utc_iso(str(row["waiting_human_since"]))
+                            ).total_seconds()
+                        ),
+                    )
+                except ValueError:
+                    add = 0
+            acc = int(row["interrupt_wall_seconds_accumulated"] or 0) + add
             c.execute(
                 """UPDATE tasks SET interrupt_seq=interrupt_seq+1,
                 interrupt_node_id=?,
@@ -362,6 +417,8 @@ class SqliteStore:
                 interrupt_checkpoint=?,
                 interrupt_response_payload=NULL,
                 interrupt_response_consumed=0,
+                interrupt_wall_seconds_accumulated=?,
+                waiting_human_since=?,
                 status=?,
                 updated_at=?
                 WHERE id=?""",
@@ -370,28 +427,52 @@ class SqliteStore:
                     _dumps(expected_schema) if expected_schema is not None else None,
                     _dumps(ui) if ui else None,
                     _dumps(checkpoint) if checkpoint else None,
+                    acc,
+                    now,
                     S.TASK_WAITING_HUMAN,
                     now,
                     task_id,
                 ),
             )
-            row = c.execute(
+            row2 = c.execute(
                 "SELECT interrupt_seq FROM tasks WHERE id=?", (task_id,)
             ).fetchone()
             c.execute("COMMIT")
-        if row is None:
+        if row2 is None:
             raise KeyError(task_id)
-        return int(row["interrupt_seq"])
+        return int(row2["interrupt_seq"])
 
     def apply_resolve(self, task_id: str, payload: dict[str, Any]) -> None:
         now = _utc_iso()
+        now_dt = parse_utc_iso(now)
         with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if row is None:
+                c.execute("ROLLBACK")
+                raise KeyError(task_id)
+            add = 0
+            wh = row["waiting_human_since"]
+            if wh:
+                try:
+                    add = max(
+                        0,
+                        int((now_dt - parse_utc_iso(str(wh))).total_seconds()),
+                    )
+                except ValueError:
+                    add = 0
+            acc = int(row["interrupt_wall_seconds_accumulated"] or 0) + add
             c.execute(
                 """UPDATE tasks SET interrupt_response_payload=?,
                 interrupt_response_consumed=0, status=?, updated_at=?,
-                worker_generation=worker_generation+1 WHERE id=?""",
-                (_dumps(payload), S.TASK_RUNNING, now, task_id),
+                worker_generation=worker_generation+1,
+                interrupt_wall_seconds_accumulated=?,
+                waiting_human_since=NULL,
+                execution_count=execution_count+1
+                WHERE id=?""",
+                (_dumps(payload), S.TASK_RUNNING, now, acc, task_id),
             )
+            c.execute("COMMIT")
 
     def consume_interrupt_response(self, task_id: str) -> None:
         with self.connect() as c:

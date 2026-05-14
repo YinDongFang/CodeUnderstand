@@ -21,9 +21,11 @@ def test_create_task_roundtrip():
             tasks_root=str(Path(td) / "runs"),
         )
         row = store.get_task(tid)
-        assert row is not None
-        assert row["workflow_key"] == "wf1"
-        assert row["status"] == "pending"
+    assert row is not None
+    assert row["workflow_key"] == "wf1"
+    assert row["status"] == "pending"
+    assert row.get("execution_count") == 0
+    assert row.get("interrupt_wall_seconds_accumulated") == 0
 
 
 def test_create_task_with_name_and_context_roundtrip(tmp_path: Path) -> None:
@@ -105,6 +107,9 @@ def test_migrate_adds_name_and_context_columns(tmp_path: Path) -> None:
     with store.connect() as c:
         cols = [str(r[1]) for r in c.execute("PRAGMA table_info(tasks)")]
     assert "name" in cols and "context_json" in cols
+    assert "execution_count" in cols
+    assert "interrupt_wall_seconds_accumulated" in cols
+    assert "waiting_human_since" in cols
 
 
 def test_reconcile_stale_worker_marks_task_stalled(tmp_path: Path) -> None:
@@ -129,3 +134,92 @@ def test_reconcile_stale_worker_marks_task_stalled(tmp_path: Path) -> None:
     node = store.list_nodes(tid)[0]
     assert node["status"] == S.NODE_FAILED
     assert node["error_json"]["category"] == "worker_lost"
+
+
+def test_mark_first_run_scheduled_sets_execution_count(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    tid = store.create_task(
+        workflow_key="wf1",
+        workflow_revision="r",
+        input_obj={},
+        tasks_root=str(tmp_path / "runs"),
+    )
+    assert store.get_task(tid)["execution_count"] == 0
+    store.mark_first_run_scheduled(tid)
+    assert store.get_task(tid)["execution_count"] == 1
+
+
+def test_prepare_rerun_increments_execution_count(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    tid = store.create_task(
+        workflow_key="wf1",
+        workflow_revision="r",
+        input_obj={},
+        tasks_root=str(tmp_path / "runs"),
+    )
+    store.mark_first_run_scheduled(tid)
+    store.prepare_task_for_rerun_execution(tid)
+    assert store.get_task(tid)["execution_count"] == 2
+
+
+def test_apply_resolve_accumulates_interrupt_wall_and_bumps_exec(tmp_path: Path) -> None:
+    import time
+
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    tid = store.create_task(
+        workflow_key="wf1",
+        workflow_revision="r",
+        input_obj={},
+        tasks_root=str(tmp_path / "runs"),
+    )
+    store.init_task_nodes(tid, ["a"])
+    store.mark_first_run_scheduled(tid)
+    store.set_task_status(tid, S.TASK_RUNNING)
+    store.open_interrupt(
+        tid,
+        node_id="a",
+        expected_schema=None,
+        ui=None,
+        checkpoint=None,
+    )
+    time.sleep(1.1)
+    store.apply_resolve(tid, {"x": 1})
+    row = store.get_task(tid)
+    assert row is not None
+    assert row["status"] == S.TASK_RUNNING
+    assert row["waiting_human_since"] is None
+    assert row["interrupt_wall_seconds_accumulated"] >= 1
+    assert row["execution_count"] == 2
+
+
+def test_second_open_interrupt_flushes_pending_segment(tmp_path: Path) -> None:
+    import time
+
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    tid = store.create_task(
+        workflow_key="wf1",
+        workflow_revision="r",
+        input_obj={},
+        tasks_root=str(tmp_path / "runs"),
+    )
+    store.init_task_nodes(tid, ["a"])
+    store.mark_first_run_scheduled(tid)
+    store.set_task_status(tid, S.TASK_RUNNING)
+    store.open_interrupt(
+        tid, node_id="a", expected_schema=None, ui=None, checkpoint=None
+    )
+    time.sleep(0.6)
+    store.open_interrupt(
+        tid, node_id="a", expected_schema=None, ui=None, checkpoint=None
+    )
+    row = store.get_task(tid)
+    assert row is not None
+    assert row["interrupt_wall_seconds_accumulated"] >= 1
