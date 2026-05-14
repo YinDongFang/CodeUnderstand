@@ -2,7 +2,7 @@
 
 **状态：** 定稿（2026-05-15）  
 **前置：** `wf_engine` 控制面、interrupt、节点 rerun、`worker_generation` 既有语义；本规格**不**将 `worker_generation` 直接暴露为「执行次数」。  
-**下一步：** 审阅通过后，用 `writing-plans` 产出实现计划。
+**实现计划：** `docs/superpowers/plans/2026-05-15-task-duration-execution-count-ui.md`
 
 ---
 
