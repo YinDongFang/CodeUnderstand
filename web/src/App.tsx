@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import {
   createTask,
   fetchLogs,
@@ -176,7 +176,7 @@ function parseJsonObjectDraft(label: string, draft: string): Record<string, unkn
     parsed = JSON.parse(draft)
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Invalid JSON'
-    throw new Error(`${label} JSON 无效：${msg}`)
+    throw new Error(`${label} JSON 无效：${msg}`, { cause: e })
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`${label} 必须是 JSON object`)
@@ -281,6 +281,7 @@ export default function App() {
   const [resolveDraft, setResolveDraft] = useState('{}')
   const [resolveErr, setResolveErr] = useState<string | null>(null)
   const [resolveBusy, setResolveBusy] = useState(false)
+  const activeInterruptRef = useRef<string | null>(null)
   const [nowTick, setNowTick] = useState(() => Date.now())
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -343,11 +344,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!selectedId) {
-      setDetail(null)
-      setDetailErr(null)
-      return
-    }
+    if (!selectedId) return
     let cancelled = false
     const tick = () => {
       fetchTask(selectedId)
@@ -355,6 +352,16 @@ export default function App() {
           if (!cancelled) {
             setDetail(d)
             setDetailErr(null)
+            if (d.interrupt) {
+              const interruptKey = `${d.id}:${d.interrupt.seq}`
+              if (activeInterruptRef.current !== interruptKey) {
+                activeInterruptRef.current = interruptKey
+                setResolveDraft(defaultPayloadDraftFromSchema(d.interrupt.expected_schema))
+                setResolveErr(null)
+              }
+            } else {
+              activeInterruptRef.current = null
+            }
           }
         })
         .catch((e: Error) => {
@@ -367,16 +374,6 @@ export default function App() {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [selectedId])
-
-  useEffect(() => {
-    logCursorRef.current = 0
-    setLogLines([])
-    setLogsErr(null)
-  }, [selectedId])
-
-  useEffect(() => {
-    setNodeActionErr(null)
   }, [selectedId])
 
   useEffect(() => {
@@ -405,35 +402,8 @@ export default function App() {
   }, [selectedId])
 
   useEffect(() => {
-    if (!modalOpen) return
-    let cancelled = false
-    setWorkflowsErr(null)
-    setWorkflowsLoading(true)
-    fetchWorkflows()
-      .then((wfs) => {
-        if (cancelled) return
-        setWorkflowOptions(wfs)
-        setNewWorkflowKey((prev) =>
-          prev && wfs.some((w) => w.key === prev) ? prev : wfs[0]?.key ?? '',
-        )
-      })
-      .catch((e: Error) => {
-        if (!cancelled) setWorkflowsErr(e.message)
-      })
-      .finally(() => {
-        if (!cancelled) setWorkflowsLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [modalOpen])
-
-  useEffect(() => {
     if (rightPanelTab !== 'settings') return
     let cancelled = false
-    setSettingsLoadErr(null)
-    setSettingsSaveErr(null)
-    setSettingsBusy(true)
     fetchSettings()
       .then((s) => {
         if (cancelled) return
@@ -454,9 +424,7 @@ export default function App() {
     }
   }, [rightPanelTab])
 
-  useEffect(() => {
-    if (!modalOpen) return
-    const wf = workflowOptions.find((w) => w.key === newWorkflowKey)
+  const applyInputDefaults = (wf: WorkflowInfo | null | undefined) => {
     const fields = parseInputSchema(wf?.input_schema ?? null)
     setInputJsonDraft(defaultPayloadDraftFromSchema(wf?.input_schema ?? null))
     if (!fields) {
@@ -470,16 +438,9 @@ export default function App() {
     }
     setInputForm(next)
     setInputMode('form')
-  }, [modalOpen, newWorkflowKey, workflowOptions])
+  }
 
-  useEffect(() => {
-    if (detail?.interrupt) {
-      setResolveDraft(defaultPayloadDraftFromSchema(detail.interrupt.expected_schema))
-      setResolveErr(null)
-    }
-  }, [detail?.interrupt?.seq, detail?.id])
-
-  const onResolve = useCallback(async () => {
+  const onResolve = async () => {
     if (!selectedId || !detail?.interrupt) return
     let payload: Record<string, unknown>
     try {
@@ -506,37 +467,34 @@ export default function App() {
     } finally {
       setResolveBusy(false)
     }
-  }, [detail?.interrupt, resolveDraft, selectedId])
+  }
 
-  const onRerunFromNode = useCallback(
-    async (nodeId: string) => {
-      if (!selectedId || !detail) return
-      if (
-        !window.confirm(
-          `Rerun from node "${nodeId}"? This resets this node and all following nodes and restores prior snapshots.`,
-        )
-      ) {
-        return
-      }
-      setNodeActionErr(null)
-      setRerunBusyNodeId(nodeId)
-      try {
-        await rerunTask(selectedId, nodeId)
-        logCursorRef.current = 0
-        setLogLines([])
-        setLogsErr(null)
-        setDetail(await fetchTask(selectedId))
-        const rows = await fetchTasks()
-        setTasks(rows)
-        setTasksErr(null)
-      } catch (e) {
-        setNodeActionErr(e instanceof Error ? e.message : String(e))
-      } finally {
-        setRerunBusyNodeId(null)
-      }
-    },
-    [detail, selectedId],
-  )
+  const onRerunFromNode = async (nodeId: string) => {
+    if (!selectedId || !detail) return
+    if (
+      !window.confirm(
+        `Rerun from node "${nodeId}"? This resets this node and all following nodes and restores prior snapshots.`,
+      )
+    ) {
+      return
+    }
+    setNodeActionErr(null)
+    setRerunBusyNodeId(nodeId)
+    try {
+      await rerunTask(selectedId, nodeId)
+      logCursorRef.current = 0
+      setLogLines([])
+      setLogsErr(null)
+      setDetail(await fetchTask(selectedId))
+      const rows = await fetchTasks()
+      setTasks(rows)
+      setTasksErr(null)
+    } catch (e) {
+      setNodeActionErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRerunBusyNodeId(null)
+    }
+  }
 
   const onSaveConsoleSettings = async () => {
     setSettingsSaveErr(null)
@@ -564,6 +522,8 @@ export default function App() {
 
   const openCreateModal = () => {
     setCreateErr(null)
+    setWorkflowsErr(null)
+    setWorkflowsLoading(true)
     setNewTaskName('')
     setNewWorkflowKey('')
     setInputMode('json')
@@ -571,6 +531,38 @@ export default function App() {
     setInputJsonDraft('{}')
     setContextJsonDraft('{}')
     setModalOpen(true)
+    fetchWorkflows()
+      .then((wfs) => {
+        setWorkflowOptions(wfs)
+        const nextWorkflow = wfs[0] ?? null
+        setNewWorkflowKey(nextWorkflow?.key ?? '')
+        applyInputDefaults(nextWorkflow)
+      })
+      .catch((e: Error) => {
+        setWorkflowsErr(e.message)
+      })
+      .finally(() => {
+        setWorkflowsLoading(false)
+      })
+  }
+
+  const selectTask = (taskId: string) => {
+    logCursorRef.current = 0
+    activeInterruptRef.current = null
+    setDetail(null)
+    setDetailErr(null)
+    setLogLines([])
+    setLogsErr(null)
+    setNodeActionErr(null)
+    setRightPanelTab('detail')
+    setSelectedId(taskId)
+  }
+
+  const openSettings = () => {
+    setSettingsLoadErr(null)
+    setSettingsSaveErr(null)
+    setSettingsBusy(true)
+    setRightPanelTab('settings')
   }
 
   const onSubmitNewTask = async () => {
@@ -584,24 +576,13 @@ export default function App() {
       return
     }
     setCreateErr(null)
-    let input: Record<string, unknown> = {}
-    let context: Record<string, unknown> = {}
-    if (inputMode === 'form' && inputFields && inputFields.length > 0) {
-      try {
-        input = buildInputFromForm(inputFields, inputForm)
-      } catch (e) {
-        setCreateErr(e instanceof Error ? e.message : String(e))
-        return
-      }
-    } else {
-      try {
-        input = parseJsonObjectDraft('input', inputJsonDraft)
-      } catch (e) {
-        setCreateErr(e instanceof Error ? e.message : String(e))
-        return
-      }
-    }
+    let input: Record<string, unknown>
+    let context: Record<string, unknown>
     try {
+      input =
+        inputMode === 'form' && inputFields && inputFields.length > 0
+          ? buildInputFromForm(inputFields, inputForm)
+          : parseJsonObjectDraft('input', inputJsonDraft)
       context = parseJsonObjectDraft('context', contextJsonDraft)
     } catch (e) {
       setCreateErr(e instanceof Error ? e.message : String(e))
@@ -620,8 +601,7 @@ export default function App() {
       setTasks(rows)
       setTasksErr(null)
       setModalOpen(false)
-      setRightPanelTab('detail')
-      setSelectedId(task_id)
+      selectTask(task_id)
     } catch (e) {
       setCreateErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -642,7 +622,7 @@ export default function App() {
                 <button
                   type="button"
                   className="ghost-btn btn-sm"
-                  onClick={() => setRightPanelTab('settings')}
+                  onClick={openSettings}
                 >
                   系统设置
                 </button>
@@ -662,10 +642,7 @@ export default function App() {
                         ? 'task-row active'
                         : 'task-row'
                     }
-                    onClick={() => {
-                      setRightPanelTab('detail')
-                      setSelectedId(t.id)
-                    }}
+                    onClick={() => selectTask(t.id)}
                     title={`${t.workflow_key} · ${t.id} · Run ${t.execution_count ?? 0} · ${formatWallSeconds(t.active_duration_seconds ?? 0)} active (excl. interrupt)`}
                   >
                     <span className="task-row-main">
@@ -972,7 +949,11 @@ export default function App() {
                 className="select-field"
                 value={newWorkflowKey}
                 disabled={workflowsLoading || workflowOptions.length === 0}
-                onChange={(e) => setNewWorkflowKey(e.target.value)}
+                onChange={(e) => {
+                  const key = e.target.value
+                  setNewWorkflowKey(key)
+                  applyInputDefaults(workflowOptions.find((w) => w.key === key) ?? null)
+                }}
               >
                 {!workflowOptions.length && !workflowsLoading && (
                   <option value="">暂无工作流</option>
