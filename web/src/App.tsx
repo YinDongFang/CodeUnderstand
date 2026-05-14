@@ -170,6 +170,20 @@ function buildInputFromForm(
   return o
 }
 
+function parseJsonObjectDraft(label: string, draft: string): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(draft)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Invalid JSON'
+    throw new Error(`${label} JSON 无效：${msg}`)
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} 必须是 JSON object`)
+  }
+  return parsed as Record<string, unknown>
+}
+
 function hasDictContent(o: Record<string, unknown> | null | undefined): boolean {
   return o != null && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length > 0
 }
@@ -276,7 +290,10 @@ export default function App() {
   const [workflowOptions, setWorkflowOptions] = useState<WorkflowInfo[]>([])
   const [newTaskName, setNewTaskName] = useState('')
   const [newWorkflowKey, setNewWorkflowKey] = useState('')
+  const [inputMode, setInputMode] = useState<'form' | 'json'>('json')
   const [inputForm, setInputForm] = useState<Record<string, string>>({})
+  const [inputJsonDraft, setInputJsonDraft] = useState('{}')
+  const [contextJsonDraft, setContextJsonDraft] = useState('{}')
   const [createErr, setCreateErr] = useState<string | null>(null)
   const [createBusy, setCreateBusy] = useState(false)
   const [rerunBusyNodeId, setRerunBusyNodeId] = useState<string | null>(null)
@@ -441,8 +458,10 @@ export default function App() {
     if (!modalOpen) return
     const wf = workflowOptions.find((w) => w.key === newWorkflowKey)
     const fields = parseInputSchema(wf?.input_schema ?? null)
+    setInputJsonDraft(defaultPayloadDraftFromSchema(wf?.input_schema ?? null))
     if (!fields) {
       setInputForm({})
+      setInputMode('json')
       return
     }
     const next: Record<string, string> = {}
@@ -450,6 +469,7 @@ export default function App() {
       next[f.key] = f.type === 'boolean' ? 'false' : ''
     }
     setInputForm(next)
+    setInputMode('form')
   }, [modalOpen, newWorkflowKey, workflowOptions])
 
   useEffect(() => {
@@ -546,7 +566,10 @@ export default function App() {
     setCreateErr(null)
     setNewTaskName('')
     setNewWorkflowKey('')
+    setInputMode('json')
     setInputForm({})
+    setInputJsonDraft('{}')
+    setContextJsonDraft('{}')
     setModalOpen(true)
   }
 
@@ -562,13 +585,27 @@ export default function App() {
     }
     setCreateErr(null)
     let input: Record<string, unknown> = {}
-    if (inputFields && inputFields.length > 0) {
+    let context: Record<string, unknown> = {}
+    if (inputMode === 'form' && inputFields && inputFields.length > 0) {
       try {
         input = buildInputFromForm(inputFields, inputForm)
       } catch (e) {
         setCreateErr(e instanceof Error ? e.message : String(e))
         return
       }
+    } else {
+      try {
+        input = parseJsonObjectDraft('input', inputJsonDraft)
+      } catch (e) {
+        setCreateErr(e instanceof Error ? e.message : String(e))
+        return
+      }
+    }
+    try {
+      context = parseJsonObjectDraft('context', contextJsonDraft)
+    } catch (e) {
+      setCreateErr(e instanceof Error ? e.message : String(e))
+      return
     }
 
     setCreateBusy(true)
@@ -577,6 +614,7 @@ export default function App() {
         workflow_key: newWorkflowKey,
         name: nameTrim,
         input,
+        context,
       })
       const rows = await fetchTasks()
       setTasks(rows)
@@ -947,44 +985,90 @@ export default function App() {
               </select>
               {inputFields && inputFields.length > 0 && (
                 <div className="modal-input-fields">
-                  <p className="lbl strong">工作流参数 (input)</p>
-                  {inputFields.map((f) => (
-                    <div key={f.key} className="field-row">
-                      <label className="lbl" htmlFor={`nt-in-${f.key}`}>
-                        {f.title}
-                        {f.required ? <span className="req-mark"> *</span> : null}
-                      </label>
-                      {f.type === 'boolean' ? (
-                        <label className="check-row">
-                          <input
-                            id={`nt-in-${f.key}`}
-                            type="checkbox"
-                            checked={inputForm[f.key] === 'true'}
-                            onChange={(e) =>
-                              setInputForm((prev) => ({
-                                ...prev,
-                                [f.key]: e.target.checked ? 'true' : 'false',
-                              }))
-                            }
-                          />
-                          <span className="muted small">是 / 否</span>
-                        </label>
-                      ) : (
-                        <input
-                          id={`nt-in-${f.key}`}
-                          type={f.type === 'number' || f.type === 'integer' ? 'number' : 'text'}
-                          className="input-text"
-                          value={inputForm[f.key] ?? ''}
-                          onChange={(e) =>
-                            setInputForm((prev) => ({ ...prev, [f.key]: e.target.value }))
-                          }
-                          autoComplete="off"
-                        />
-                      )}
-                    </div>
-                  ))}
+                  <div className="mode-tabs" aria-label="input mode">
+                    <button
+                      type="button"
+                      className={inputMode === 'form' ? 'mode-tab active' : 'mode-tab'}
+                      onClick={() => setInputMode('form')}
+                    >
+                      表单
+                    </button>
+                    <button
+                      type="button"
+                      className={inputMode === 'json' ? 'mode-tab active' : 'mode-tab'}
+                      onClick={() => setInputMode('json')}
+                    >
+                      JSON
+                    </button>
+                  </div>
+                  {inputMode === 'form' && (
+                    <>
+                      <p className="lbl strong">工作流参数 (input)</p>
+                      {inputFields.map((f) => (
+                        <div key={f.key} className="field-row">
+                          <label className="lbl" htmlFor={`nt-in-${f.key}`}>
+                            {f.title}
+                            {f.required ? <span className="req-mark"> *</span> : null}
+                          </label>
+                          {f.type === 'boolean' ? (
+                            <label className="check-row">
+                              <input
+                                id={`nt-in-${f.key}`}
+                                type="checkbox"
+                                checked={inputForm[f.key] === 'true'}
+                                onChange={(e) =>
+                                  setInputForm((prev) => ({
+                                    ...prev,
+                                    [f.key]: e.target.checked ? 'true' : 'false',
+                                  }))
+                                }
+                              />
+                              <span className="muted small">是 / 否</span>
+                            </label>
+                          ) : (
+                            <input
+                              id={`nt-in-${f.key}`}
+                              type={
+                                f.type === 'number' || f.type === 'integer' ? 'number' : 'text'
+                              }
+                              className="input-text"
+                              value={inputForm[f.key] ?? ''}
+                              onChange={(e) =>
+                                setInputForm((prev) => ({ ...prev, [f.key]: e.target.value }))
+                              }
+                              autoComplete="off"
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               )}
+              {(!inputFields || inputFields.length === 0 || inputMode === 'json') && (
+                <>
+                  <label className="lbl strong" htmlFor="nt-input-json">
+                    input JSON
+                  </label>
+                  <textarea
+                    id="nt-input-json"
+                    className="textarea json-draft"
+                    value={inputJsonDraft}
+                    onChange={(e) => setInputJsonDraft(e.target.value)}
+                    spellCheck={false}
+                  />
+                </>
+              )}
+              <label className="lbl strong" htmlFor="nt-context-json">
+                context JSON
+              </label>
+              <textarea
+                id="nt-context-json"
+                className="textarea json-draft"
+                value={contextJsonDraft}
+                onChange={(e) => setContextJsonDraft(e.target.value)}
+                spellCheck={false}
+              />
               {createErr && <p className="err">{createErr}</p>}
             </div>
             <footer className="modal-footer">

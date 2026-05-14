@@ -640,6 +640,37 @@
   border-top: 1px solid #30363d;
 }
 
+.mode-tabs {
+  display: inline-flex;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+}
+
+.mode-tab {
+  border: 0;
+  border-right: 1px solid #30363d;
+  background: transparent;
+  color: #8b949e;
+  padding: 0.42rem 0.7rem;
+  cursor: pointer;
+}
+
+.mode-tab:last-child {
+  border-right: 0;
+}
+
+.mode-tab.active {
+  background: #1f6feb;
+  color: #fff;
+}
+
+.json-draft {
+  min-height: 7rem;
+}
+
 .lbl.strong {
   font-weight: 600;
   margin-top: 0.35rem;

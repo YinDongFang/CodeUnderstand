@@ -130,11 +130,12 @@ export function createTask(body: {
   workflow_key: string
   name: string
   input: Record<string, unknown>
+  context: Record<string, unknown>
 }): Promise<{ task_id: string }> {
   return fetch(`${BASE}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...body, context: {} }),
+    body: JSON.stringify(body),
   }).then((r) => parseJson<{ task_id: string }>(r))
 }
 
