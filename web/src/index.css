@@ -2,6 +2,21 @@
   box-sizing: border-box;
 }
 
+:root {
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Code", monospace;
+  --fs-meta-label: 0.8125rem;
+  --fs-meta-value: 0.875rem;
+}
+
+html {
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
 html,
 body,
 #root {

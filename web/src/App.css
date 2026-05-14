@@ -3,7 +3,7 @@
   flex-direction: column;
   height: 100vh;
   margin: 0;
-  font-family: system-ui, sans-serif;
+  font-family: inherit;
   background: #0f1419;
   color: #e6edf3;
 }
@@ -119,8 +119,8 @@
 }
 
 .mono {
-  font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  font-size: inherit;
 }
 
 .chips {
@@ -252,15 +252,34 @@
   grid-template-columns: 8rem 1fr;
   gap: 0.35rem 0.75rem;
   margin: 0 0 1rem;
+  font-family: var(--font-ui);
 }
 
 .meta dt {
   margin: 0;
   color: #8b949e;
+  font-size: var(--fs-meta-label);
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .meta dd {
   margin: 0;
+  font-size: var(--fs-meta-value);
+  line-height: 1.45;
+  font-family: var(--font-ui);
+  color: #e6edf3;
+}
+
+.meta dd.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta-value);
+}
+
+.meta dd .chip {
+  font-size: var(--fs-meta-value);
+  line-height: 1.25;
+  vertical-align: baseline;
 }
 
 .kv-table {
@@ -408,7 +427,7 @@
 }
 
 .log-run-title {
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
 }
 
 .log-run-body {
