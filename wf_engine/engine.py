@@ -18,6 +18,10 @@ class Engine:
     def get_workflow(self, key: str) -> Workflow:
         return self._workflows[key]
 
+    def list_workflows(self) -> list[dict[str, str]]:
+        wfs = sorted(self._workflows.values(), key=lambda wf: wf.key)
+        return [{"key": wf.key, "revision": wf.revision} for wf in wfs]
+
     def serve(
         self,
         host: str = "127.0.0.1",

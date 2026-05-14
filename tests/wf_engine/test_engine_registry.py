@@ -15,3 +15,14 @@ def test_duplicate_workflow_key_rejected():
     eng.register_workflow(wf)
     with pytest.raises(ValueError, match="workflow_key"):
         eng.register_workflow(wf)
+
+
+def test_engine_lists_registered_workflows():
+    eng = Engine()
+    wf = Workflow(key="a", revision="2")
+
+    def n(ctx):
+        pass
+
+    wf.add_node("x", n)
+    eng.register_workflow(wf)
