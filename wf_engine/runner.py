@@ -14,11 +14,11 @@ from wf_engine.utils.archives import (
     pack_whitelist_zip,
     warn_extraneous_workspace_files,
 )
-from wf_engine.utils.lease import utc_iso_after
+from wf_engine.utils.lease import utc_iso, utc_iso_after
 from wf_engine.utils.log_markers import format_run_begin
 from wf_engine.utils.sandbox import resolve_node_workdir
 from wf_engine.utils.task_layout import task_layout
-from wf_engine.store.sqlite import SqliteStore, _utc_iso
+from wf_engine.store.sqlite import SqliteStore
 from wf_engine.workflow import Workflow
 
 wf_log_node: contextvars.ContextVar[str] = contextvars.ContextVar("wf_log_node", default="")
@@ -111,7 +111,7 @@ def run_once(
         if cur["status"] != S.TASK_RUNNING:
             store.set_task_status(task_id, S.TASK_RUNNING)
 
-        now = _utc_iso()
+        now = utc_iso()
         store.update_node(task_id, ordinal, status=S.NODE_RUNNING, started_at=now)
 
         if worker_pid is not None:
@@ -128,7 +128,7 @@ def run_once(
                 task_id,
                 ordinal,
                 status=S.NODE_FAILED,
-                finished_at=_utc_iso(),
+                finished_at=utc_iso(),
                 error_json={"category": "validation", "message": str(e)},
             )
             store.set_task_status(task_id, S.TASK_FAILED)
@@ -178,7 +178,7 @@ def run_once(
                     task_id,
                     ordinal,
                     status=S.NODE_FAILED,
-                    finished_at=_utc_iso(),
+                    finished_at=utc_iso(),
                     error_json={"category": "business", "message": str(e)},
                 )
                 store.set_task_status(task_id, S.TASK_FAILED)
@@ -201,7 +201,7 @@ def run_once(
                     task_id,
                     ordinal,
                     status=S.NODE_FAILED,
-                    finished_at=_utc_iso(),
+                    finished_at=utc_iso(),
                     error_json={"category": "validation", "message": str(e)},
                 )
                 store.set_task_status(task_id, S.TASK_FAILED)
@@ -214,7 +214,7 @@ def run_once(
         else:
             zip_path_str = None
 
-        fin = _utc_iso()
+        fin = utc_iso()
         if zip_path_str is not None:
             store.update_node(
                 task_id,

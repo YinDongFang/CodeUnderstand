@@ -15,6 +15,7 @@ from wf_engine import status as S
 from wf_engine.utils.lease import parse_utc_iso, pid_alive
 from wf_engine.utils.task_layout import task_layout
 from wf_engine.utils.sandbox import resolve_node_workdir
+from wf_engine.server.deps import _cp, _err
 from wf_engine.server.paths_util import effective_tasks_root
 from wf_engine.server.state import ControlPlaneState
 from wf_engine.task_timing import compute_active_duration_seconds
@@ -46,14 +47,6 @@ class RerunBody(BaseModel):
 class LogsResponse(BaseModel):
     lines: list[str]
     next_cursor: int
-
-
-def _cp(request: Request) -> ControlPlaneState:
-    return request.app.state.cp
-
-
-def _err(code: str, message: str) -> dict[str, Any]:
-    return {"error": {"code": code, "message": message}}
 
 
 def _worker_lease_active(row: dict[str, Any]) -> bool:

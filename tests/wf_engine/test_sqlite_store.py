@@ -7,7 +7,8 @@ import pytest
 import sqlite3
 
 from wf_engine import status as S
-from wf_engine.store.sqlite import SqliteStore, _utc_iso
+from wf_engine.store.sqlite import SqliteStore
+from wf_engine.utils.lease import utc_iso
 
 
 def test_create_task_roundtrip():
@@ -125,7 +126,7 @@ def test_reconcile_stale_worker_marks_task_stalled(tmp_path: Path) -> None:
     )
     store.init_task_nodes(tid, ["only"])
     store.set_task_status(tid, S.TASK_RUNNING)
-    store.update_node(tid, 0, status=S.NODE_RUNNING, started_at=_utc_iso())
+    store.update_node(tid, 0, status=S.NODE_RUNNING, started_at=utc_iso())
     store.acquire_lease(tid, os.getpid(), "2000-01-01T00:00:00Z")
 
     store.reconcile_stale_worker_for_task(tid)

@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from wf_engine.server.deps import _cp, _err
 from wf_engine.server.paths_util import effective_tasks_root
 from wf_engine.server.state import ControlPlaneState
 
@@ -15,14 +16,6 @@ class ConsoleSettingsBody(BaseModel):
     root: str = ""
     cookie: str = ""
     authorization: str = ""
-
-
-def _cp(request: Request) -> ControlPlaneState:
-    return request.app.state.cp
-
-
-def _err(code: str, message: str) -> dict:
-    return {"error": {"code": code, "message": message}}
 
 
 def _normalize_tasks_root_for_storage(cp: ControlPlaneState, raw: str) -> str:

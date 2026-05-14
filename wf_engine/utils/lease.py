@@ -4,6 +4,10 @@ import os
 from datetime import datetime, timedelta, timezone
 
 
+def utc_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def utc_iso_after(*, seconds: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"

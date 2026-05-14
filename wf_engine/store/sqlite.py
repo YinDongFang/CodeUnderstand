@@ -9,15 +9,11 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from wf_engine import status as S
-from wf_engine.utils.lease import parse_utc_iso, pid_alive
+from wf_engine.utils.lease import parse_utc_iso, pid_alive, utc_iso
 
 CONSOLE_SETTINGS_KEY = "console_settings"
 LEGACY_OPS_KEY = "ops_globals"
 LEGACY_SYSTEM_KEY = "system_config"
-
-
-def _utc_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _dumps(obj: Any) -> str:
@@ -219,7 +215,7 @@ class SqliteStore:
         context_obj: dict[str, Any] | None = None,
     ) -> str:
         tid = str(uuid.uuid4())
-        now = _utc_iso()
+        now = utc_iso()
         ctx = {} if context_obj is None else context_obj
         with self.connect() as c:
             c.execute(
@@ -280,7 +276,7 @@ class SqliteStore:
         with self.connect() as c:
             c.execute(
                 "UPDATE tasks SET context_json=?, updated_at=? WHERE id=?",
-                (_dumps(obj), _utc_iso(), task_id),
+                (_dumps(obj), utc_iso(), task_id),
             )
 
     def list_tasks(self) -> list[dict[str, Any]]:
@@ -292,7 +288,7 @@ class SqliteStore:
         with self.connect() as c:
             c.execute(
                 "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
-                (status, _utc_iso(), task_id),
+                (status, utc_iso(), task_id),
             )
 
     def init_task_nodes(self, task_id: str, node_ids: list[str]) -> None:
@@ -329,7 +325,7 @@ class SqliteStore:
             )
 
     def prepare_task_for_rerun_execution(self, task_id: str) -> None:
-        now = _utc_iso()
+        now = utc_iso()
         with self.connect() as c:
             c.execute(
                 """UPDATE tasks SET status=?, updated_at=?,
@@ -373,7 +369,7 @@ class SqliteStore:
         if not lease_dead and not pid_dead:
             return
 
-        fin = _utc_iso()
+        fin = utc_iso()
         err = _dumps(
             {
                 "category": "worker_lost",
@@ -461,7 +457,7 @@ class SqliteStore:
         ui: dict | None,
         checkpoint: dict | None,
     ) -> int:
-        now = _utc_iso()
+        now = utc_iso()
         now_dt = parse_utc_iso(now)
         with self.connect() as c:
             c.execute("BEGIN IMMEDIATE")
@@ -518,7 +514,7 @@ class SqliteStore:
         return int(row2["interrupt_seq"])
 
     def apply_resolve(self, task_id: str, payload: dict[str, Any]) -> None:
-        now = _utc_iso()
+        now = utc_iso()
         now_dt = parse_utc_iso(now)
         with self.connect() as c:
             c.execute("BEGIN IMMEDIATE")
@@ -553,19 +549,19 @@ class SqliteStore:
             c.execute(
                 """UPDATE tasks SET interrupt_response_consumed=1,
                 interrupt_response_payload=NULL, updated_at=? WHERE id=?""",
-                (_utc_iso(), task_id),
+                (utc_iso(), task_id),
             )
 
     def acquire_lease(self, task_id: str, pid: int, lease_until: str) -> None:
         with self.connect() as c:
             c.execute(
                 "UPDATE tasks SET worker_pid=?, lease_until=?, updated_at=? WHERE id=?",
-                (pid, lease_until, _utc_iso(), task_id),
+                (pid, lease_until, utc_iso(), task_id),
             )
 
     def release_lease(self, task_id: str) -> None:
         with self.connect() as c:
             c.execute(
                 "UPDATE tasks SET worker_pid=NULL, lease_until=NULL, updated_at=? WHERE id=?",
-                (_utc_iso(), task_id),
+                (utc_iso(), task_id),
             )

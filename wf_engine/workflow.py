@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from wf_engine.context import NodeContext
@@ -31,6 +32,8 @@ class Workflow:
         workdir: str = ".",
         whitelist: Sequence[str] = (),
     ) -> None:
+        if ".." in Path(workdir).parts:
+            raise ValueError(f"workdir must not contain '..': {workdir!r}")
         self.nodes.append(
             NodeSpec(
                 id=node_id,
