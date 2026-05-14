@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from wf_engine.zip_util import WhitelistPackError, pack_whitelist_zip
+from wf_engine.utils.zip_util import WhitelistPackError, pack_whitelist_zip
 
 
 def test_pack_whitelist_includes_only_matches():

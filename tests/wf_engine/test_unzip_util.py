@@ -3,7 +3,7 @@ import zipfile
 from pathlib import Path
 import tempfile
 import pytest
-from wf_engine.unzip_util import UnsafeArchiveError, extract_zip_safely
+from wf_engine.utils.unzip_util import UnsafeArchiveError, extract_zip_safely
 
 
 def test_extract_rejects_zip_slip():

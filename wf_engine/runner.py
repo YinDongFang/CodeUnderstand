@@ -15,7 +15,11 @@ from wf_engine.paths import task_layout
 from wf_engine.sandbox import resolve_node_workdir
 from wf_engine.store.sqlite import SqliteStore, _utc_iso
 from wf_engine.workflow import Workflow
-from wf_engine.zip_util import WhitelistPackError, pack_whitelist_zip, warn_extraneous_workspace_files
+from wf_engine.utils.zip_util import (
+    WhitelistPackError,
+    pack_whitelist_zip,
+    warn_extraneous_workspace_files,
+)
 
 wf_log_node: contextvars.ContextVar[str] = contextvars.ContextVar("wf_log_node", default="")
 
