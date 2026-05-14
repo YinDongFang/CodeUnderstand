@@ -1,4 +1,4 @@
-"""Settings HTTP API integration tests (/settings, /settings/ops, /settings/system)."""
+"""Settings HTTP API: GET/PUT /settings (flat console settings)."""
 
 from __future__ import annotations
 
@@ -33,20 +33,7 @@ def settings_api_app(tmp_path: Path):
     return {"app": app, "store": store}
 
 
-def test_settings_ops_get_default(settings_api_app):
-    app = settings_api_app["app"]
-
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.get("/settings/ops")
-            assert r.status_code == 200
-            assert r.json() == {"cookie": "", "authorization": ""}
-
-    asyncio.run(_run())
-
-
-def test_settings_bundle_and_system(settings_api_app):
+def test_settings_get_default(settings_api_app):
     app = settings_api_app["app"]
 
     async def _run() -> None:
@@ -54,20 +41,42 @@ def test_settings_bundle_and_system(settings_api_app):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             r = await client.get("/settings")
             assert r.status_code == 200
-            body = r.json()
-            assert body["ops"] == {"cookie": "", "authorization": ""}
-            assert "tasks_root" in body["system"]
-            assert "server_tasks_root_default" in body["system"]
-            assert "tasks_root_effective" in body["system"]
-
-            r2 = await client.get("/settings/system")
-            assert r2.status_code == 200
-            assert r2.json() == body["system"]
+            j = r.json()
+            assert j["cookie"] == ""
+            assert j["authorization"] == ""
+            assert j["tasks_root"] == ""
+            assert "server_tasks_root_default" in j
+            assert "tasks_root_effective" in j
 
     asyncio.run(_run())
 
 
-def test_settings_system_put_creates_dir(tmp_path: Path):
+def test_settings_put_roundtrip(settings_api_app):
+    app = settings_api_app["app"]
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.put(
+                "/settings",
+                json={
+                    "tasks_root": "",
+                    "cookie": "sid=1",
+                    "authorization": "Bearer z",
+                },
+            )
+            assert r.status_code == 200
+            assert r.json()["cookie"] == "sid=1"
+            assert r.json()["authorization"] == "Bearer z"
+
+            r2 = await client.get("/settings")
+            assert r2.status_code == 200
+            assert r2.json()["cookie"] == "sid=1"
+
+    asyncio.run(_run())
+
+
+def test_settings_put_tasks_root_creates_dir(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
@@ -85,31 +94,18 @@ def test_settings_system_put_creates_dir(tmp_path: Path):
     async def _run() -> None:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.put("/settings/system", json={"tasks_root": str(custom)})
+            r = await client.put(
+                "/settings",
+                json={
+                    "tasks_root": str(custom),
+                    "cookie": "",
+                    "authorization": "",
+                },
+            )
             assert r.status_code == 200
             j = r.json()
             assert Path(j["tasks_root"]).resolve() == custom.resolve()
             assert j["tasks_root_effective"] == j["tasks_root"]
             assert custom.is_dir()
-
-    asyncio.run(_run())
-
-
-def test_settings_ops_put_roundtrip(settings_api_app):
-    app = settings_api_app["app"]
-
-    async def _run() -> None:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r = await client.put(
-                "/settings/ops",
-                json={"cookie": "sid=1", "authorization": "Bearer z"},
-            )
-            assert r.status_code == 200
-            assert r.json() == {"cookie": "sid=1", "authorization": "Bearer z"}
-
-            r2 = await client.get("/settings/ops")
-            assert r2.status_code == 200
-            assert r2.json() == {"cookie": "sid=1", "authorization": "Bearer z"}
 
     asyncio.run(_run())

@@ -91,7 +91,14 @@ def test_post_tasks_uses_configured_tasks_root(api_setup):
     async def _run() -> None:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            r0 = await client.put("/settings/system", json={"tasks_root": str(custom_root)})
+            r0 = await client.put(
+                "/settings",
+                json={
+                    "tasks_root": str(custom_root),
+                    "cookie": "",
+                    "authorization": "",
+                },
+            )
             assert r0.status_code == 200
             r = await client.post("/tasks", json={"workflow_key": "api_wf", "input": {}})
             assert r.status_code == 201

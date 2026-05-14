@@ -1,3 +1,4 @@
+import json
 import tempfile
 import os
 from pathlib import Path
@@ -198,46 +199,86 @@ def test_apply_resolve_accumulates_interrupt_wall_and_bumps_exec(tmp_path: Path)
     assert row["execution_count"] == 2
 
 
-def test_ops_globals_default_empty(tmp_path: Path) -> None:
+def test_console_settings_default_empty(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
-    assert store.get_ops_globals() == {"cookie": "", "authorization": ""}
+    assert store.get_console_settings() == {
+        "tasks_root": "",
+        "cookie": "",
+        "authorization": "",
+    }
 
 
-def test_system_config_default_and_roundtrip(tmp_path: Path) -> None:
+def test_console_settings_roundtrip(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
-    assert store.get_system_config() == {"tasks_root": ""}
-    store.set_system_config(tasks_root="/tmp/x")
-    assert store.get_system_config() == {"tasks_root": "/tmp/x"}
-    store.set_system_config(tasks_root="")
-    assert store.get_system_config() == {"tasks_root": ""}
+    store.set_console_settings(
+        tasks_root="/data/t",
+        cookie="a=b",
+        authorization="Bearer x",
+    )
+    assert store.get_console_settings() == {
+        "tasks_root": "/data/t",
+        "cookie": "a=b",
+        "authorization": "Bearer x",
+    }
+    store.set_console_settings(tasks_root="", cookie="", authorization="")
+    assert store.get_console_settings() == {
+        "tasks_root": "",
+        "cookie": "",
+        "authorization": "",
+    }
 
 
-def test_ops_globals_roundtrip(tmp_path: Path) -> None:
+def test_console_settings_merges_legacy_split_rows(tmp_path: Path) -> None:
+    from wf_engine.store.sqlite import LEGACY_OPS_KEY, LEGACY_SYSTEM_KEY
+
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
-    store.set_ops_globals("a=b", "Bearer x")
-    assert store.get_ops_globals() == {"cookie": "a=b", "authorization": "Bearer x"}
-    store.set_ops_globals("", "")
-    assert store.get_ops_globals() == {"cookie": "", "authorization": ""}
-
-
-def test_ops_globals_corrupt_json_falls_back_to_empty(tmp_path: Path) -> None:
-    db = tmp_path / "db.sqlite"
-    store = SqliteStore(db)
-    store.init_schema()
-    from wf_engine.store.sqlite import OPS_GLOBALS_KEY
-
     with store.connect() as c:
         c.execute(
             "INSERT OR REPLACE INTO settings (key, value_json) VALUES (?, ?)",
-            (OPS_GLOBALS_KEY, "not-json"),
+            (LEGACY_OPS_KEY, json.dumps({"cookie": "c", "authorization": "a"})),
         )
-    assert store.get_ops_globals() == {"cookie": "", "authorization": ""}
+        c.execute(
+            "INSERT OR REPLACE INTO settings (key, value_json) VALUES (?, ?)",
+            (LEGACY_SYSTEM_KEY, json.dumps({"tasks_root": "/legacy"})),
+        )
+    assert store.get_console_settings() == {
+        "tasks_root": "/legacy",
+        "cookie": "c",
+        "authorization": "a",
+    }
+    store.set_console_settings(tasks_root="/n", cookie="x", authorization="y")
+    with store.connect() as c:
+        n_legacy = c.execute(
+            "SELECT COUNT(*) FROM settings WHERE key IN (?, ?)",
+            (LEGACY_OPS_KEY, LEGACY_SYSTEM_KEY),
+        ).fetchone()[0]
+    assert n_legacy == 0
+    assert store.get_console_settings()["tasks_root"] == "/n"
+
+
+def test_console_settings_corrupt_primary_falls_back_to_legacy(tmp_path: Path) -> None:
+    from wf_engine.store.sqlite import CONSOLE_SETTINGS_KEY, LEGACY_OPS_KEY
+
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    with store.connect() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO settings (key, value_json) VALUES (?, ?)",
+            (CONSOLE_SETTINGS_KEY, "not-json"),
+        )
+        c.execute(
+            "INSERT OR REPLACE INTO settings (key, value_json) VALUES (?, ?)",
+            (LEGACY_OPS_KEY, json.dumps({"cookie": "ok", "authorization": ""})),
+        )
+    assert store.get_console_settings()["cookie"] == "ok"
+    assert store.get_console_settings()["tasks_root"] == ""
 
 
 def test_second_open_interrupt_flushes_pending_segment(tmp_path: Path) -> None:

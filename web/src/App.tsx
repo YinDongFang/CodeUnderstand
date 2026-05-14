@@ -1,15 +1,14 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   createTask,
-  fetchAllSettings,
   fetchLogs,
+  fetchSettings,
   fetchTask,
   fetchTasks,
   fetchWorkflows,
   resolveInterrupt,
   rerunTask,
-  saveOpsSettings,
-  saveSystemSettings,
+  saveSettings,
   type TaskDetail,
   type TaskNode,
   type TaskSummary,
@@ -418,14 +417,14 @@ export default function App() {
     setSettingsLoadErr(null)
     setSettingsSaveErr(null)
     setSettingsBusy(true)
-    fetchAllSettings()
-      .then((bundle) => {
+    fetchSettings()
+      .then((s) => {
         if (cancelled) return
-        setOpsCookieDraft(bundle.ops.cookie)
-        setOpsAuthDraft(bundle.ops.authorization)
-        setTasksRootDraft(bundle.system.tasks_root)
-        setServerTasksRootDefault(bundle.system.server_tasks_root_default)
-        setTasksRootEffective(bundle.system.tasks_root_effective)
+        setTasksRootDraft(s.tasks_root)
+        setOpsCookieDraft(s.cookie)
+        setOpsAuthDraft(s.authorization)
+        setServerTasksRootDefault(s.server_tasks_root_default)
+        setTasksRootEffective(s.tasks_root_effective)
       })
       .catch((e: Error) => {
         if (!cancelled) setSettingsLoadErr(e.message)
@@ -523,15 +522,16 @@ export default function App() {
     setSettingsSaveErr(null)
     setSettingsBusy(true)
     try {
-      const [opsSaved, sysSaved] = await Promise.all([
-        saveOpsSettings({ cookie: opsCookieDraft, authorization: opsAuthDraft }),
-        saveSystemSettings({ tasks_root: tasksRootDraft }),
-      ])
-      setOpsCookieDraft(opsSaved.cookie)
-      setOpsAuthDraft(opsSaved.authorization)
-      setTasksRootDraft(sysSaved.tasks_root)
-      setServerTasksRootDefault(sysSaved.server_tasks_root_default)
-      setTasksRootEffective(sysSaved.tasks_root_effective)
+      const s = await saveSettings({
+        tasks_root: tasksRootDraft,
+        cookie: opsCookieDraft,
+        authorization: opsAuthDraft,
+      })
+      setTasksRootDraft(s.tasks_root)
+      setOpsCookieDraft(s.cookie)
+      setOpsAuthDraft(s.authorization)
+      setServerTasksRootDefault(s.server_tasks_root_default)
+      setTasksRootEffective(s.tasks_root_effective)
     } catch (e) {
       setSettingsSaveErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -600,9 +600,18 @@ export default function App() {
           <aside className="pane left">
             <div className="left-head">
               <h2 className="left-title">任务</h2>
-              <button type="button" className="primary btn-sm" onClick={openCreateModal}>
-                新建任务
-              </button>
+              <div className="left-head-actions">
+                <button
+                  type="button"
+                  className="ghost-btn btn-sm"
+                  onClick={() => setRightPanelTab('settings')}
+                >
+                  系统设置
+                </button>
+                <button type="button" className="primary btn-sm" onClick={openCreateModal}>
+                  新建任务
+                </button>
+              </div>
             </div>
             {tasksErr && <p className="err">{tasksErr}</p>}
             <ul className="task-list">
@@ -655,54 +664,56 @@ export default function App() {
 
             {rightPanelTab === 'settings' ? (
               <section className="settings-in-pane" aria-label="系统设置">
-                <h2 className="task-detail-title">系统设置</h2>
-                <p className="muted small">
-                  与任务 context 分库；Ops 在每次 <code className="mono">run_once</code> 入口注入{' '}
-                  <code className="mono">NodeContext.ops_globals</code>。任务根目录仅影响
-                  <strong>新建</strong>任务；既有任务仍使用创建时记录在库中的路径。
-                </p>
                 {settingsLoadErr && <p className="err">{settingsLoadErr}</p>}
-
-                <h3 className="section-heading">系统</h3>
-                <p className="muted small mono wrap-break">
-                  服务启动默认 tasks 根：<strong>{serverTasksRootDefault || '—'}</strong>
-                  <br />
-                  当前新建任务生效：<strong>{tasksRootEffective || '—'}</strong>
-                </p>
-                <label className="lbl" htmlFor="sys-tasks-root">
-                  覆盖 tasks 根目录（留空则用启动值；保存时解析并创建目录）
+                <label className="lbl mono" htmlFor="ro-server-root">
+                  server_tasks_root_default
+                </label>
+                <input
+                  id="ro-server-root"
+                  readOnly
+                  className="input-text mono muted-field"
+                  value={serverTasksRootDefault}
+                />
+                <label className="lbl mono" htmlFor="ro-effective-root">
+                  tasks_root_effective
+                </label>
+                <input
+                  id="ro-effective-root"
+                  readOnly
+                  className="input-text mono muted-field"
+                  value={tasksRootEffective}
+                />
+                <label className="lbl mono" htmlFor="sys-tasks-root">
+                  tasks_root
                 </label>
                 <textarea
                   id="sys-tasks-root"
-                  className="textarea"
+                  className="textarea mono"
                   rows={2}
                   spellCheck={false}
                   autoComplete="off"
-                  placeholder="绝对或相对路径，可留空"
                   value={tasksRootDraft}
                   onChange={(e) => setTasksRootDraft(e.target.value)}
                   disabled={settingsBusy}
                 />
-
-                <h3 className="section-heading">Ops 全局</h3>
-                <label className="lbl" htmlFor="ops-cookie-settings">
-                  Cookie（可多行）
+                <label className="lbl mono" htmlFor="ops-cookie-settings">
+                  cookie
                 </label>
                 <textarea
                   id="ops-cookie-settings"
-                  className="textarea"
+                  className="textarea mono"
                   rows={5}
                   spellCheck={false}
                   value={opsCookieDraft}
                   onChange={(e) => setOpsCookieDraft(e.target.value)}
                   disabled={settingsBusy}
                 />
-                <label className="lbl" htmlFor="ops-auth-settings">
-                  Authorization（可多行）
+                <label className="lbl mono" htmlFor="ops-auth-settings">
+                  authorization
                 </label>
                 <textarea
                   id="ops-auth-settings"
-                  className="textarea"
+                  className="textarea mono"
                   rows={5}
                   spellCheck={false}
                   autoComplete="off"
@@ -718,7 +729,7 @@ export default function App() {
                     disabled={settingsBusy}
                     onClick={() => void onSaveConsoleSettings()}
                   >
-                    {settingsBusy ? '保存中…' : '保存全部'}
+                    {settingsBusy ? '保存中…' : '保存'}
                   </button>
                 </div>
               </section>

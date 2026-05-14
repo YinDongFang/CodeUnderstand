@@ -678,8 +678,10 @@
   margin-bottom: 0.35rem;
 }
 
-.field-row .input-text {
-  margin-bottom: 0.5rem;
+.field-row .input-text.mono.muted-field,
+.input-text.mono.muted-field {
+  opacity: 0.88;
+  cursor: default;
 }
 
 .req-mark {

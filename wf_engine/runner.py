@@ -55,7 +55,13 @@ def run_once(
     layout.workspace.mkdir(parents=True, exist_ok=True)
     layout.zips.mkdir(parents=True, exist_ok=True)
 
-    ops_snapshot = store.get_ops_globals()
+    base = store.get_console_settings()
+    settings_snapshot = {
+        "tasks_root": base["tasks_root"],
+        "cookie": base["cookie"],
+        "authorization": base["authorization"],
+        "task_parent_dir": str(task_root.resolve().parent),
+    }
 
     pid = worker_pid if worker_pid is not None else os.getpid()
     _append_task_log_line(
@@ -136,7 +142,7 @@ def run_once(
             human_input=human_input,
             input=snapshot_input,
             context=shared_context,
-            ops_globals=ops_snapshot,
+            settings=settings_snapshot,
         )
         injected_human = human_input is not None
 

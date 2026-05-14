@@ -80,20 +80,13 @@ export type LogsResponse = {
   next_cursor: number
 }
 
-export type OpsGlobals = {
+/** Flat GET/PUT /settings payload (persisted + derived server paths). */
+export type ConsoleSettings = {
+  tasks_root: string
   cookie: string
   authorization: string
-}
-
-export type SystemSettings = {
-  tasks_root: string
   server_tasks_root_default: string
   tasks_root_effective: string
-}
-
-export type ConsoleSettings = {
-  ops: OpsGlobals
-  system: SystemSettings
 }
 
 export function fetchTasks(): Promise<TaskSummary[]> {
@@ -117,30 +110,20 @@ export function fetchWorkflows(): Promise<WorkflowInfo[]> {
   return fetch(`${BASE}/workflows`).then((r) => parseJson<WorkflowInfo[]>(r))
 }
 
-export function fetchAllSettings(): Promise<ConsoleSettings> {
+export function fetchSettings(): Promise<ConsoleSettings> {
   return fetch(`${BASE}/settings`).then((r) => parseJson<ConsoleSettings>(r))
 }
 
-export function fetchOpsSettings(): Promise<OpsGlobals> {
-  return fetch(`${BASE}/settings/ops`).then((r) => parseJson<OpsGlobals>(r))
-}
-
-export function saveOpsSettings(body: OpsGlobals): Promise<OpsGlobals> {
-  return fetch(`${BASE}/settings/ops`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).then((r) => parseJson<OpsGlobals>(r))
-}
-
-export function saveSystemSettings(body: {
+export function saveSettings(body: {
   tasks_root: string
-}): Promise<SystemSettings> {
-  return fetch(`${BASE}/settings/system`, {
+  cookie: string
+  authorization: string
+}): Promise<ConsoleSettings> {
+  return fetch(`${BASE}/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }).then((r) => parseJson<SystemSettings>(r))
+  }).then((r) => parseJson<ConsoleSettings>(r))
 }
 
 export function createTask(body: {

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** This plan has been **executed**. Steps below are retained as an audit trail (`- [x]`).
 
-**交付状态（2026-05-15）：** 已全部完成。实现合并于 `3786458`（`feat(wf_engine,web): global ops settings`）；本计划与 spec §9 链接见 `32e7d25`；规格正文见 `2cd27b6`。
+**交付状态（2026-05-15）：** 已全部完成。实现合并于 `3786458` / `7695563` 及后续提交；以 `docs/superpowers/specs/2026-05-15-wf-console-global-ops-settings-design.md` **最新版**为准（统一 `console_settings`、`GET/PUT /settings`、`NodeContext.settings`）。
 
 **Goal:** Persist `cookie` and `authorization` in SQLite `settings` table; expose `GET/PUT /settings/ops`; inject `ops_globals` into `NodeContext` on each `run_once` entry; add Web settings modal.
 

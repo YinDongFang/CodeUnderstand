@@ -53,19 +53,22 @@ def test_runner_persists_context_on_business_failure(tmp_path: Path) -> None:
     assert row["input_json"] == {"seed": 1}
 
 
-def test_ops_globals_injected_from_store(tmp_path: Path) -> None:
+def test_settings_injected_from_store(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
-    store.set_ops_globals("ck=1", "tok")
+    store.set_console_settings(
+        tasks_root="", cookie="ck=1", authorization="tok"
+    )
 
     wf = Workflow(key="wf_ops")
 
     seen: dict[str, str] = {}
 
     def n1(ctx: NodeContext) -> None:
-        seen["cookie"] = ctx.ops_globals.get("cookie", "")
-        seen["authorization"] = ctx.ops_globals.get("authorization", "")
+        seen["cookie"] = ctx.settings.get("cookie", "")
+        seen["authorization"] = ctx.settings.get("authorization", "")
+        seen["task_parent_dir"] = ctx.settings.get("task_parent_dir", "")
 
     wf.add_node("a", n1)
     tr = tmp_path / "tasks" / "t_ops"
@@ -83,7 +86,9 @@ def test_ops_globals_injected_from_store(tmp_path: Path) -> None:
 
     run_once(store=store, workflow=wf, task_id=tid, task_root=tr)
 
-    assert seen == {"cookie": "ck=1", "authorization": "tok"}
+    assert seen["cookie"] == "ck=1"
+    assert seen["authorization"] == "tok"
+    assert Path(seen["task_parent_dir"]) == (tmp_path / "tasks").resolve()
 
 
 def test_interrupt_saves_context_before_waiting_human(tmp_path: Path) -> None:

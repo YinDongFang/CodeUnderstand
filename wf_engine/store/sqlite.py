@@ -11,8 +11,9 @@ from typing import Any, Iterator
 from wf_engine import status as S
 from wf_engine.lease_util import parse_utc_iso, pid_alive
 
-OPS_GLOBALS_KEY = "ops_globals"
-SYSTEM_CONFIG_KEY = "system_config"
+CONSOLE_SETTINGS_KEY = "console_settings"
+LEGACY_OPS_KEY = "ops_globals"
+LEGACY_SYSTEM_KEY = "system_config"
 
 
 def _utc_iso() -> str:
@@ -141,66 +142,70 @@ class SqliteStore:
             )
 
     @staticmethod
-    def _empty_ops_globals() -> dict[str, str]:
-        return {"cookie": "", "authorization": ""}
+    def _defaults_console() -> dict[str, str]:
+        return {"tasks_root": "", "cookie": "", "authorization": ""}
 
-    def get_ops_globals(self) -> dict[str, str]:
-        empty = self._empty_ops_globals()
+    def get_console_settings(self) -> dict[str, str]:
+        out = self._defaults_console()
         with self.connect() as c:
             row = c.execute(
                 "SELECT value_json FROM settings WHERE key=?",
-                (OPS_GLOBALS_KEY,),
+                (CONSOLE_SETTINGS_KEY,),
             ).fetchone()
-        if row is None:
-            return dict(empty)
-        try:
-            raw = _loads(row["value_json"])
-        except json.JSONDecodeError:
-            return dict(empty)
-        if not isinstance(raw, dict):
-            return dict(empty)
-        return {
-            "cookie": str(raw.get("cookie") or ""),
-            "authorization": str(raw.get("authorization") or ""),
-        }
+            if row is not None:
+                try:
+                    raw = _loads(row["value_json"])
+                    if isinstance(raw, dict):
+                        out["tasks_root"] = str(raw.get("tasks_root") or "")
+                        out["cookie"] = str(raw.get("cookie") or "")
+                        out["authorization"] = str(raw.get("authorization") or "")
+                        return dict(out)
+                except json.JSONDecodeError:
+                    pass
+            r_ops = c.execute(
+                "SELECT value_json FROM settings WHERE key=?",
+                (LEGACY_OPS_KEY,),
+            ).fetchone()
+            if r_ops is not None:
+                try:
+                    o = _loads(r_ops["value_json"])
+                    if isinstance(o, dict):
+                        out["cookie"] = str(o.get("cookie") or "")
+                        out["authorization"] = str(o.get("authorization") or "")
+                except json.JSONDecodeError:
+                    pass
+            r_sys = c.execute(
+                "SELECT value_json FROM settings WHERE key=?",
+                (LEGACY_SYSTEM_KEY,),
+            ).fetchone()
+            if r_sys is not None:
+                try:
+                    s = _loads(r_sys["value_json"])
+                    if isinstance(s, dict):
+                        out["tasks_root"] = str(s.get("tasks_root") or "")
+                except json.JSONDecodeError:
+                    pass
+        return dict(out)
 
-    def set_ops_globals(self, cookie: str, authorization: str) -> None:
-        payload = _dumps({"cookie": cookie, "authorization": authorization})
+    def set_console_settings(
+        self,
+        *,
+        tasks_root: str,
+        cookie: str,
+        authorization: str,
+    ) -> None:
+        payload = _dumps(
+            {"tasks_root": tasks_root, "cookie": cookie, "authorization": authorization}
+        )
         with self.connect() as c:
             c.execute(
                 """INSERT INTO settings (key, value_json) VALUES (?, ?)
                    ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json""",
-                (OPS_GLOBALS_KEY, payload),
+                (CONSOLE_SETTINGS_KEY, payload),
             )
-
-    @staticmethod
-    def _empty_system_config() -> dict[str, str]:
-        return {"tasks_root": ""}
-
-    def get_system_config(self) -> dict[str, str]:
-        empty = self._empty_system_config()
-        with self.connect() as c:
-            row = c.execute(
-                "SELECT value_json FROM settings WHERE key=?",
-                (SYSTEM_CONFIG_KEY,),
-            ).fetchone()
-        if row is None:
-            return dict(empty)
-        try:
-            raw = _loads(row["value_json"])
-        except json.JSONDecodeError:
-            return dict(empty)
-        if not isinstance(raw, dict):
-            return dict(empty)
-        return {"tasks_root": str(raw.get("tasks_root") or "")}
-
-    def set_system_config(self, *, tasks_root: str) -> None:
-        payload = _dumps({"tasks_root": tasks_root})
-        with self.connect() as c:
             c.execute(
-                """INSERT INTO settings (key, value_json) VALUES (?, ?)
-                   ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json""",
-                (SYSTEM_CONFIG_KEY, payload),
+                "DELETE FROM settings WHERE key IN (?, ?)",
+                (LEGACY_OPS_KEY, LEGACY_SYSTEM_KEY),
             )
 
     def create_task(
