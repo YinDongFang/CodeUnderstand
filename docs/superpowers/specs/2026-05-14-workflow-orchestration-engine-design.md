@@ -27,8 +27,8 @@
 | 概念 | 说明 |
 |------|------|
 | **工作流（Workflow）** | 用户以 Python 描述的**串行**节点定义集合（顺序由注册顺序或显式列表表达）；含节点级产物路径、白名单、`interrupt` 标记等。 |
-| **任务（Task）** | 某工作流的一次运行实例；具独立**任务根目录**、独立 worker 进程边界、独立 DB 记录。 |
-| **节点（Node）** | 最小执行单元；状态：`pending` / `running` / `success` / `failed`，以及 `waiting_human`（任务级或节点级约定其一，实现时统一即可）。 |
+| **任务（Task）** | 某工作流的一次运行实例；具独立**任务根目录**、独立 worker 进程边界、独立 DB 记录；`status` 见 **§8.1**。 |
+| **节点（Node）** | 最小执行单元；状态枚举见 **§8.2**（与任务状态 **§8.1** 配合）。 |
 | **人工介入（Interrupt）** | 节点执行至中断点时，持久化「期待输入」与 checkpoint；worker 退出；用户经 HTTP  Submit 后 **resume**。 |
 
 ---
@@ -114,11 +114,74 @@
 
 ---
 
-## 8. 错误处理与状态
+## 8. 任务状态与节点状态（规范）
 
-- **节点失败**：标 `failed`，任务进入失败终态；**默认无自动重试**。  
-- **Worker 异常退出**：任务标为可恢复的「异常停止」类状态；**不自动猜**下一动作；允许人工 `rerun`。  
-- **interrupt**：任务（或节点）进入 `waiting_human`；收到合法 payload 后迁移为可执行 resume。
+本节约束 **持久化与 HTTP DTO** 中使用的枚举值（字符串建议 **小写 snake_case**，与下表 `code` 一致）。**不得**在同字段混用别名（如 `SUCCESS` / `Success`）。
+
+### 8.1 任务状态（`task.status`）
+
+| `code` | 含义 | 是否终态 |
+|--------|------|----------|
+| `pending` | 任务已创建（DB 有记录），**尚未**进入可执行轮次（尚无 worker 世代认领或尚未从队列启动）。 | 否 |
+| `running` | 任务处于某一 **worker 世代** 的执行过程中：推进节点、打 zip、或刚 spawn 即将从 checkpoint 继续。 | 否 |
+| `waiting_human` | 任务停在 **interrupt** 点：已落库「期待输入」，**当前无**活跃 worker（上一世代已退出）；等待 `POST /tasks/{id}/interrupt/resolve`。 | 否 |
+| `succeeded` | 全部节点均已 `success`，任务正常结束。 | **是** |
+| `failed` | **业务或节点级**失败导致的终态：至少一个节点为 `failed`，且根因归类为 **业务/校验**（含白名单缺件、节点抛错等）。 | **是** |
+| `stalled` | **运维/进程级**异常终态：已检测到 **worker 非正常消失**（崩溃、SIGKILL、失联等），引擎**不猜测**续跑方式；允许人工 `rerun` / 在适用时配合 resolve API（若实现选择支持）。**不等于**节点业务失败。 | **是** |
+
+**并发不变式：** 对同一 `task_id`，**至多一个**「活跃 worker 世代」与 `running` 语义一致；`waiting_human`、`succeeded`、`failed`、`stalled` 下不得存在仍将任务视为可执行的活跃 worker（实现须以 DB + supervisor 一致为准）。
+
+**任务状态迁移（允许边；未列出的迁移视为非法，须拒绝或返回 409）：**
+
+```text
+pending ──启动──► running
+running ──最后一节点 success──► succeeded
+running ──某节点 failed（业务/校验）──► failed
+running ──interrupt 落库、worker 退出──► waiting_human
+running ──检测到 worker 丢失──► stalled
+
+waiting_human ──interrupt/resolve 成功，spawn 新世代──► running
+
+stalled ──仅允许经明确的运维操作（如 rerun / 恢复策略，实现计划写死）──► running 或 pending
+failed ──（可选）经人工 rerun 自某节点──► running；实现若不支持从 failed 直接 rerun，须在 API 层文档化
+```
+
+**说明：** 「从节点重跑」`rerun(from_node_id)` 在进入执行前须将任务置为可执行态：实现可选取 `running`（推荐，与「正在跑」统一）或先短暂 `pending` 再 `running`；无论哪种，**单任务互斥**仍须满足。
+
+### 8.2 节点状态（`nodes[].status`）
+
+| `code` | 含义 | 是否终态 |
+|--------|------|----------|
+| `pending` | 尚未开始执行本节点。 | 否 |
+| `running` | 本节点逻辑或其后处理（含白名单 zip）进行中。 | 否 |
+| `waiting_human` | 本节点触发 **interrupt**：已写期待输入与 checkpoint，**worker 已退出**；等待人工 resolve 后继续**本节点**（而非跳过）。 | 否 |
+| `success` | 本节点成功完成；若配置产物目录，则 **zip 已生成且路径已写入 DB**；可作为后续 `rerun` 的前置快照源。 | **是** |
+| `failed` | 本节点失败终态（业务异常、快照校验失败、或 **worker 丢失时当前节点**——见下）。 | **是** |
+
+**节点与任务状态的对应关系（不变式）：**
+
+- 任务 `succeeded` ⟹ 所有节点 `success`，且顺序与 workflow 定义一致。
+- 任务 `failed` ⟹ **恰好一个**节点为「首例失败」语义（实现可记录 `first_failed_node_id`）；该节点 `failed`，其**左侧**（先序）节点均为 `success`，**右侧**均为 `pending`（不得出现 `success`）。
+- 任务 `waiting_human` ⟹ **恰好一个**节点为 `waiting_human`（当前 interrupt 节点）；其先序节点均为 `success`，后续为 `pending`。
+- 任务 `running` ⟹ **至多一个**节点为 `running` 或 `waiting_human`（二者互斥）；其余已完成者为 `success`，未开始为 `pending`。
+- 任务 `stalled` ⟹ 通常由 **上一时刻** 的 `running` 节点触发 worker 丢失；实现须将该节点标为 `failed`，并设置 `error.category = "worker_lost"`（或等价枚举），以便 UI 与 `failed`（业务）区分。
+
+**`rerun(from_node_id = K)`** 对节点数组的约束：
+
+- 所有 **先于 K** 的节点：保持 `success`（及其 zip 元数据）；磁盘侧由引擎按 spec §4 **清空并解压复现**。
+- **从 K 起至末尾**：在进入 `running` 前应重置为 `pending`（清除 K 及之后的完成标记、起止时间与 zip 路径等业务字段，具体列由实现计划定），然后按串行重新执行。
+
+### 8.3 HTTP / JSON 字段约束
+
+- `GET /tasks/{id}` 响应中：**必须**包含 `status`（任务，取值 §8.1）与 **`nodes` 数组**；每项 **必须**包含 `node_id`（或等价主键）与 `status`（取值 §8.2）。  
+- 节点处于 `failed` 时 **建议**包含 `error: { "category": "business" | "validation" | "worker_lost", "message": string }`，便于控制台区分「业务失败」与 **stalled 链路上的节点失败**。  
+- 任务处于 `failed` / `stalled` / `waiting_human` 时 **建议**包含人类可读 `message` 或结构化 `blocking_reason`（实现计划可选）。
+
+### 8.4 错误处理与自动重试（与状态配合）
+
+- **业务节点失败**：该节点 `failed`（`error.category` 为 `business` 或 `validation`），任务 `failed`；**默认无自动重试**。  
+- **Worker 丢失**：任务 `stalled`；当前节点 `failed` 且 `error.category = "worker_lost"`；**不自动**续跑。  
+- **interrupt**：任务 `waiting_human`，当前节点 `waiting_human`；`interrupt/resolve` 成功后任务回到 `running`，该节点从 `waiting_human` 进入 `running` 继续执行。
 
 ---
 
@@ -143,6 +206,7 @@
 | interrupt | 落库 + worker 退出；resume 同目录继续 |
 | 中途重跑 | 清空 + 顺序解压前置 zip |
 | 任务拓扑 | 串行；`GET /tasks/{id}` 返回 `nodes` 数组，无单独 graph 接口 |
+| 任务/节点状态 | 枚举、不变式、合法迁移与 DTO 约束见 **§8** |
 
 ---
 
@@ -151,3 +215,4 @@
 | 日期 | 说明 |
 |------|------|
 | 2026-05-14 | 初版：合并 brainstorming 第 1–3 节与用户修订（库注册、resume/rerun 目录语义、去掉 graph 接口）。 |
+| 2026-05-14 | 增补 **§8**：任务/节点状态枚举、不变式、合法迁移、`rerun` 节点数组重置、HTTP 字段约束；**§2**/**§10** 与 §8 对齐。 |
