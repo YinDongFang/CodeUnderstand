@@ -10,169 +10,16 @@ import {
   rerunTask,
   saveSettings,
   type TaskDetail,
-  type TaskNode,
   type TaskSummary,
   type WorkflowInfo,
 } from './api'
+import { formatTaskDisplayTime, formatWallSeconds } from './utils/format'
+import { splitLogLinesIntoRuns, logRunTitle, groupLogLines } from './utils/log'
+import { defaultPayloadDraftFromSchema, parseInputSchema, buildInputFromForm } from './utils/schema'
+import { displayTaskName, hasDictContent, chipClass, stringifyCell, nodeTiming, sortedNodes, TASK_TERMINAL } from './utils/display'
 import './App.css'
 
 const POLL_MS = 2000
-
-/** 终态：完成时间取 `updated_at`（末次状态变更）。 */
-const TASK_TERMINAL = new Set(['succeeded', 'failed', 'stalled'])
-
-function formatTaskDisplayTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`
-  const t = Date.parse(normalized)
-  if (Number.isNaN(t)) return iso
-  return new Date(t).toLocaleString()
-}
-
-/** Wall-clock seconds (e.g. active duration from API). */
-function formatWallSeconds(totalSec: number): string {
-  const s = Math.max(0, Math.floor(totalSec))
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  if (m < 60) return r ? `${m}m ${r}s` : `${m}m`
-  const h = Math.floor(m / 60)
-  const rm = m % 60
-  return rm ? `${h}h ${rm}m` : `${h}h`
-}
-
-const LOG_NODE_MARKER = /\[\d+:[^\]]+\]/
-const LOG_RUN_BEGIN = 'WF_ENGINE_RUN_BEGIN'
-
-/** Split tail buffer into runs; each new ``WF_ENGINE_RUN_BEGIN`` starts a segment (backend ``run_once``). */
-function splitLogLinesIntoRuns(lines: string[]): string[][] {
-  const runs: string[][] = []
-  let cur: string[] = []
-  for (const line of lines) {
-    if (line.includes(LOG_RUN_BEGIN) && cur.length > 0) {
-      runs.push(cur)
-      cur = []
-    }
-    cur.push(line)
-  }
-  if (cur.length) runs.push(cur)
-  return runs
-}
-
-function logRunTitle(runLines: string[], runIndex: number, totalRuns: number): string {
-  const first = runLines[0] ?? ''
-  const m = first.match(/WF_ENGINE_RUN_BEGIN round=(\d+)/)
-  if (m) return `Round ${m[1]}`
-  if (totalRuns === 1) return 'Log'
-  return runIndex === 0 ? 'Legacy log (no run marker)' : `Section ${runIndex + 1}`
-}
-
-/** Group log lines by first `[ordinal:node_id]` marker per line; unprefixed lines stay in ``global``. */
-function groupLogLines(lines: string[]): Array<{ title: string; lines: string[] }> {
-  const out: Array<{ title: string; lines: string[] }> = []
-  let curTitle = 'global'
-
-  function ensureCur() {
-    const last = out[out.length - 1]
-    if (!last || last.title !== curTitle) {
-      out.push({ title: curTitle, lines: [] })
-    }
-  }
-
-  for (const line of lines) {
-    const m = line.match(LOG_NODE_MARKER)
-    const tag = m?.[0] ?? null
-    if (tag) curTitle = tag
-    ensureCur()
-    out[out.length - 1].lines.push(line)
-  }
-  return out
-}
-
-function displayTaskName(row: { name?: string | null; id: string }): string {
-  const n = row.name?.trim()
-  return n ? n : `未命名 (${row.id.slice(0, 8)}…)`
-}
-
-/** Seeds textarea from JSON Schema `required` + `properties` so POST does not send `{}`. */
-function defaultPayloadDraftFromSchema(
-  schema: Record<string, unknown> | null | undefined,
-): string {
-  if (!schema || typeof schema !== 'object') {
-    return '{}'
-  }
-  const req = schema.required
-  const props = schema.properties as Record<string, Record<string, unknown>> | undefined
-  if (!Array.isArray(req) || !props) {
-    return '{}'
-  }
-  const o: Record<string, unknown> = {}
-  for (const key of req) {
-    if (typeof key !== 'string') continue
-    const p = props[key]
-    const t = p && typeof p === 'object' ? (p as { type?: string }).type : undefined
-    if (t === 'string') o[key] = ''
-    else if (t === 'number') o[key] = 0
-    else if (t === 'boolean') o[key] = false
-    else if (t === 'array') o[key] = []
-    else if (t === 'object') o[key] = {}
-    else o[key] = null
-  }
-  return JSON.stringify(o, null, 2)
-}
-
-type InputFieldSpec = { key: string; required: boolean; type: string; title: string }
-
-function parseInputSchema(schema: unknown): InputFieldSpec[] | null {
-  if (!schema || typeof schema !== 'object') return null
-  const s = schema as Record<string, unknown>
-  if (s.type !== 'object') return null
-  const props = s.properties
-  if (!props || typeof props !== 'object') return null
-  const keys = Object.keys(props as object)
-  if (keys.length === 0) return null
-  const required = new Set(
-    Array.isArray(s.required)
-      ? (s.required as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [],
-  )
-  const po = props as Record<string, Record<string, unknown>>
-  return keys.map((key) => {
-    const p = po[key]
-    const t = typeof p?.type === 'string' ? p.type : 'string'
-    const title = typeof p?.title === 'string' ? p.title : key
-    return { key, required: required.has(key), type: t, title }
-  })
-}
-
-function buildInputFromForm(
-  fields: InputFieldSpec[],
-  values: Record<string, string>,
-): Record<string, unknown> {
-  const o: Record<string, unknown> = {}
-  for (const f of fields) {
-    const raw = values[f.key] ?? ''
-    if (f.type === 'number' || f.type === 'integer') {
-      if (raw.trim() === '') {
-        if (f.required) throw new Error(`请填写：${f.title}`)
-        continue
-      }
-      const n = Number(raw)
-      if (Number.isNaN(n)) throw new Error(`${f.title} 须为数字`)
-      o[f.key] = n
-    } else if (f.type === 'boolean') {
-      o[f.key] = raw === 'true' || raw === '1'
-    } else {
-      if (f.required && !raw.trim()) throw new Error(`请填写：${f.title}`)
-      if (raw !== '' || f.required) o[f.key] = raw
-    }
-  }
-  return o
-}
-
-function hasDictContent(o: Record<string, unknown> | null | undefined): boolean {
-  return o != null && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length > 0
-}
 
 function KvBlock({ title, data }: { title: string; data: Record<string, unknown> }) {
   return (
@@ -194,65 +41,6 @@ function KvBlock({ title, data }: { title: string; data: Record<string, unknown>
       </table>
     </>
   )
-}
-
-function chipClass(status: string): string {
-  const s = status.toLowerCase()
-  if (s.includes('success') || s === 'succeeded') return 'chip chip-ok'
-  if (s.includes('fail') || s.includes('stalled')) return 'chip chip-bad'
-  if (s.includes('wait') || s.includes('human')) return 'chip chip-warn'
-  if (s.includes('run')) return 'chip chip-run'
-  return 'chip'
-}
-
-function parseApiTs(iso: string | null): number | null {
-  if (!iso) return null
-  const t = Date.parse(iso)
-  return Number.isNaN(t) ? null : t
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 500) return `${Math.max(0, Math.round(ms))}ms`
-  const s = ms / 1000
-  if (s < 60) return `${s >= 10 || s === Math.floor(s) ? Math.round(s) : s.toFixed(1)}s`
-  const m = Math.floor(s / 60)
-  const rs = Math.floor(s % 60)
-  return `${m}m${rs.toString().padStart(2, '0')}s`
-}
-
-function formatClockUtc(ms: number): string {
-  return new Date(ms).toISOString().slice(11, 19)
-}
-
-function nodeTiming(n: TaskNode, nowMs: number): { summary: string; detail?: string } {
-  const t0 = parseApiTs(n.started_at)
-  const t1 = parseApiTs(n.finished_at)
-  const st = n.status.toLowerCase()
-
-  if (t0 === null) {
-    return { summary: 'Not started' }
-  }
-  if (t1 !== null) {
-    return {
-      summary: `Duration ${formatDuration(t1 - t0)}`,
-      detail: `${formatClockUtc(t0)} → ${formatClockUtc(t1)}`,
-    }
-  }
-  if (st === 'running' || st === 'waiting_human') {
-    return { summary: `Running ${formatDuration(Math.max(0, nowMs - t0))}` }
-  }
-  return { summary: `Started ${formatClockUtc(t0)}` }
-}
-
-function sortedNodes(nodes: TaskNode[]): TaskNode[] {
-  return [...nodes].sort((a, b) => a.ordinal - b.ordinal)
-}
-
-function stringifyCell(v: unknown): string {
-  if (typeof v === 'object' && v !== null) {
-    return JSON.stringify(v, null, 2)
-  }
-  return String(v)
 }
 
 export default function App() {
