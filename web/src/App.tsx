@@ -619,7 +619,11 @@ export default function App() {
                 <li key={t.id}>
                   <button
                     type="button"
-                    className={t.id === selectedId ? 'task-row active' : 'task-row'}
+                    className={
+                      t.id === selectedId && rightPanelTab === 'detail'
+                        ? 'task-row active'
+                        : 'task-row'
+                    }
                     onClick={() => {
                       setRightPanelTab('detail')
                       setSelectedId(t.id)
@@ -641,27 +645,6 @@ export default function App() {
             {!tasks.length && !tasksErr && <p className="muted">暂无任务</p>}
           </aside>
           <main className="pane right">
-            <div className="right-tabs-bar" role="tablist" aria-label="右栏视图">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={rightPanelTab === 'detail'}
-                className={rightPanelTab === 'detail' ? 'tab-pill is-active' : 'tab-pill'}
-                onClick={() => setRightPanelTab('detail')}
-              >
-                任务详情
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={rightPanelTab === 'settings'}
-                className={rightPanelTab === 'settings' ? 'tab-pill is-active' : 'tab-pill'}
-                onClick={() => setRightPanelTab('settings')}
-              >
-                系统设置
-              </button>
-            </div>
-
             {rightPanelTab === 'settings' ? (
               <section className="settings-in-pane" aria-label="系统设置">
                 {settingsLoadErr && <p className="err">{settingsLoadErr}</p>}
