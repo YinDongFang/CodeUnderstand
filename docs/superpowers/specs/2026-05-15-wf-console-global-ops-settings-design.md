@@ -2,7 +2,7 @@
 
 **状态：** 定稿（2026-05-15）  
 **前置：** `wf_engine` SQLite 控制面、现有任务 `context_json`（每任务运行期上下文）、`NodeContext`、`run_once`。  
-**下一步：** 审阅本 spec 后使用 `writing-plans` 产出实现计划。
+**实现计划：** `docs/superpowers/plans/2026-05-15-wf-console-global-ops-settings.md`
 
 ---
 
@@ -106,4 +106,4 @@
 
 ## 9. 实现计划
 
-审阅通过后：`docs/superpowers/plans/2026-05-15-wf-console-global-ops-settings.md`（由 `writing-plans` 生成）。
+已定稿：`docs/superpowers/plans/2026-05-15-wf-console-global-ops-settings.md`。
