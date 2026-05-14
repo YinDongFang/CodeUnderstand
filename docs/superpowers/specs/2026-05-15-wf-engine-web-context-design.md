@@ -130,7 +130,7 @@ Body JSON 建议：
 ## 7. `NodeContext` 与注册表（实现侧）
 
 - `NodeContext` 暴露 **`input`**（只读映射到任务 `input_json` 快照）与 **`context`**（可变 dict， backed by `context_json`）。  
-- Worker 须能加载 **`WF_ENGINE_REGISTRY_MODULE`**；与现有一致。  
+- Worker 启动时调用 `Engine.discover_workflows()`，自动扫描 `workflow/*.py` 模块的声明式元数据（`WORKFLOW_KEY` / `get_nodes()` / `get_input_schema()`）；与控制面共用同一发现机制。  
 - **`GET /workflows`** 数据来自 **`Engine`** 内注册表枚举（新方法 `list_workflows()` 或等价）。
 
 ---

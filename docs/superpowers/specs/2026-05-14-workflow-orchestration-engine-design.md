@@ -51,7 +51,7 @@
 
 ### 3.2 与 LangGraph 对齐的使用方式（语义层）
 
-- 用户在业务包中：`Workflow` 构建 → `engine.register_workflow(wf)` → `engine.serve(...)` 启动控制面。  
+- 用户在 `workflow/` 目录下创建 `.py` 模块，暴露 `WORKFLOW_KEY` / `get_input_schema()` / `get_nodes()` 声明式元数据；`Engine.discover_workflows()` 自动扫描构造 `Workflow` 对象 → `engine.serve(...)` 启动控制面。  
 - Worker 子进程须能 `import` 用户模块：**单机内网共用一个 venv/安装环境**为默认前提。
 
 ### 3.3 持久化
@@ -253,7 +253,7 @@ PROC ApiInterruptResolve(task_id, request_body):
 
 #### 3.5.1 标识符与注册表
 
-- **`workflow_key`**：`register_workflow` 时传入的字符串键，在同一 **控制面进程** 内 **唯一**。重复注册：**拒绝**或 **显式覆盖**（二选一，须在实现计划中固定并在测试中覆盖）。  
+- **`workflow_key`**：模块级 `WORKFLOW_KEY` 常量（默认为文件名 stem），在同一 **控制面进程** 内 **唯一**。重复键：**拒绝**或 **显式覆盖**（二选一，须在实现计划中固定并在测试中覆盖）。  
 - **`task_id`**：建议 **UUIDv4** 字符串（小写、带连字符）；HTTP 路径中须正确转义。  
 - **`node_id`**：在同一 **Workflow** 定义内 **唯一**、**稳定**（同一工作流模板多次实例化任务时 id 不变），由用户代码指定；引擎 **不**自动生成。字符集建议：`[a-zA-Z0-9._-]`，长度上限 **64**（实现可收紧）。  
 - **任务与工作流绑定**：创建任务时记录 `workflow_key` + **workflow 定义版本戳**（见 §3.5.5）；运行侧 **不得**因用户事后改掉 Python 代码而静默改变**已在跑或待恢复**任务的拓扑。
