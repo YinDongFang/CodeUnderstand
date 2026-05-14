@@ -10,7 +10,7 @@
 
 **Spec source:** `docs/superpowers/specs/2026-05-14-workflow-orchestration-engine-design.md`
 
-**Implementation status:** Task 1–11 are implemented on branch `flow` (`wf_engine/`, `web/`, `tests/wf_engine/`). Run `pytest tests/wf_engine/` to verify. Extra modules vs. the file map below: `wf_engine/lease_util.py`, `wf_engine/sandbox.py`. Spec-gap items OE-001…OE-007 are closed per `docs/superpowers/issues/2026-05-14-wf-engine-spec-gap-closure.md` (landed with `288ba5e` among others). **Still outstanding** (plan “Gaps” §): log rotation §3.5.9, maximum zip size, multi-uvicorn / multi-writer guard beyond `workers=1`.
+**Implementation status:** Task 1–11 are implemented on branch `flow` (`wf_engine/`, `web/`, `tests/wf_engine/`). Authoritative verification should be run on Ubuntu; see `docs/ubuntu-testing.md`. Utility modules have since been consolidated under `wf_engine/utils/` (`archives.py`, `lease.py`, `task_layout.py`, `sandbox.py`, `log_markers.py`), so older file-map references to top-level `zip_util.py`, `unzip_util.py`, `lease_util.py`, or `paths.py` are historical. Spec-gap items OE-001…OE-007 are closed per `docs/superpowers/issues/2026-05-14-wf-engine-spec-gap-closure.md` (landed with `288ba5e` among others). **Still outstanding** (plan “Gaps” §): log rotation §3.5.9, maximum zip size, multi-uvicorn / multi-writer guard beyond `workers=1`.
 
 ---
 

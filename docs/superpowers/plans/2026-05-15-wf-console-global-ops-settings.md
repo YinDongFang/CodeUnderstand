@@ -4,7 +4,9 @@
 
 **交付状态（2026-05-15）：** 已全部完成。实现合并于 `3786458` / `7695563` 及后续提交；以 `docs/superpowers/specs/2026-05-15-wf-console-global-ops-settings-design.md` **最新版**为准（统一 `console_settings`、`GET/PUT /settings`、`NodeContext.settings`）。
 
-**Goal:** Persist `cookie` and `authorization` in SQLite `settings` table; expose `GET/PUT /settings/ops`; inject `ops_globals` into `NodeContext` on each `run_once` entry; add Web settings modal.
+> **Historical note:** The original plan below used `/settings/ops` and `NodeContext.ops_globals`. Those names were superseded by the revised spec. Do not execute this plan literally; the current contract is `GET/PUT /settings`, `console_settings`, and `NodeContext.settings`.
+
+**Goal (historical):** Persist `cookie` and `authorization` in SQLite `settings` table; expose `GET/PUT /settings/ops`; inject `ops_globals` into `NodeContext` on each `run_once` entry; add Web settings modal.
 
 **Architecture:** `SqliteStore` owns `settings` rows; dedicated small `routes_settings` router; `run_once` calls `store.get_ops_globals()` once per invocation; `NodeContext` gains required `ops_globals` dict (normalized keys).
 
@@ -123,7 +125,7 @@
 | §4 NodeContext / run_once | Task 3 |
 | §5 UI | Task 4 |
 
-No TBD; `ops_globals` naming matches spec.
+No TBD in the historical plan. `ops_globals` no longer matches the revised spec; see `docs/superpowers/specs/2026-05-15-wf-console-global-ops-settings-design.md`.
 
 ---
 

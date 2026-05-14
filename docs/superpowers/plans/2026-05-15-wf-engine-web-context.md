@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**交付状态（2026-05-15 修订）：** 该计划主体已实现，当前仓库以后续代码与 `docs/superpowers/specs/2026-05-15-wf-engine-web-context-design.md` 为准。下方未勾选步骤保留为执行日志，不代表当前未完成项。后续维护重点：创建任务 UI 必须同时支持 schema 字段表单、raw `input` JSON 与 raw `context` JSON。
+
 **Goal:** 落实定稿规格 `docs/superpowers/specs/2026-05-15-wf-engine-web-context-design.md`：任务 `name` + 只读 `input` + 可变 `context`（节点出口落库）、`GET /workflows`、日志节点前缀供前端折叠、Web 去 topbar + 创建任务模态 + 列表/详情展示调整。
 
 **Architecture:** SQLite 迁移增列；`NodeContext` 持 `input`（快照）与 `context`（可变 dict）；`run_once` 每节点 Callable 结束后及 `ControlledInterrupt`/普通异常路径上 **`save_task_context`**；worker 日志用 `contextvars` + `logging.Filter` 注入 `wf_node` 供 Formatter 前缀；API 扩展 `POST/GET /tasks` 与新增 `GET /workflows`；前端按前缀解析日志行分组折叠。

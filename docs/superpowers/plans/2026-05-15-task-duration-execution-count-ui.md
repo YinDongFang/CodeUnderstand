@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**交付状态（2026-05-15 修订）：** 该计划主体已实现，未勾选步骤保留为历史执行日志，不代表当前未完成项。路径引用以当前代码为准：时间解析 helper 位于 `wf_engine.utils.lease`，不再使用历史路径 `wf_engine.lease_util`。
+
 **Goal:** Persist `execution_count` and interrupt wall-clock accounting; expose `active_duration_seconds` on list/detail APIs; show both on the Web list and detail; translate the **right-hand detail pane** to English per spec.
 
 **Architecture:** Add three `tasks` columns + migration; update store methods (`open_interrupt`, `apply_resolve`, `prepare_task_for_rerun_execution`, `create_task` INSERT) and a pure **`compute_active_duration_seconds`** helper used by FastAPI serializers. Web: extend `api.ts` types and `App.tsx` strings/layout; keep left rail + create modal in Chinese.
