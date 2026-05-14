@@ -16,10 +16,9 @@ _WORKFLOW_PACKAGE = "workflow"
 def _build_workflow_from_module(mod: ModuleType, *, default_key: str) -> Workflow | None:
     """Construct a ``Workflow`` from a module's declarative attributes.
 
-    Reads ``WORKFLOW_KEY`` (optional, defaults to ``default_key``),
-    ``get_input_schema()`` (optional), and ``get_nodes()`` (required).
-    Returns ``None`` if ``get_nodes`` is missing — callers should treat that
-    as "module is not a workflow".
+    Returns ``None`` when the module lacks ``get_nodes`` (treated as
+    "not a workflow"); otherwise reads ``WORKFLOW_KEY`` (defaults to
+    ``default_key``) and ``get_input_schema()`` (optional).
     """
     get_nodes = getattr(mod, "get_nodes", None)
     if get_nodes is None:
@@ -94,18 +93,11 @@ class Engine:
                 if stem.startswith("_"):
                     continue
                 mod_name = f"{_WORKFLOW_PACKAGE}.{stem}"
-                try:
-                    mod = importlib.import_module(mod_name)
-                except Exception:
-                    log.exception("failed to import %s", mod_name)
-                    continue
+                mod = importlib.import_module(mod_name)
                 wf = _build_workflow_from_module(mod, default_key=stem)
                 if wf is None:
                     continue
-                try:
-                    self.register_workflow(wf)
-                except ValueError:
-                    log.exception("duplicate workflow_key from %s", mod_name)
+                self.register_workflow(wf)
         return len(self._workflows) - count_before
 
     def serve(
