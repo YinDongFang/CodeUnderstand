@@ -5,16 +5,12 @@ import {
   fetchTasks,
   resolveInterrupt,
   rerunTask,
-  type TaskDetail,
+  type TaskDetail as TaskDetailType,
   type TaskSummary,
 } from './api'
-import { formatTaskDisplayTime, formatWallSeconds } from './utils/format'
 import { defaultPayloadDraftFromSchema } from './utils/schema'
-import { displayTaskName, hasDictContent, chipClass, TASK_TERMINAL } from './utils/display'
-import KvBlock from './components/KvBlock'
-import NodeStrip from './components/NodeStrip'
-import LogViewer from './components/LogViewer'
-import InterruptPanel from './components/InterruptPanel'
+import TaskList from './components/TaskList'
+import TaskDetail from './components/TaskDetail'
 import SettingsPanel from './components/SettingsPanel'
 import CreateTaskModal from './components/CreateTaskModal'
 import './App.css'
@@ -25,7 +21,7 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskSummary[]>([])
   const [tasksErr, setTasksErr] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const [detail, setDetail] = useState<TaskDetailType | null>(null)
   const [detailErr, setDetailErr] = useState<string | null>(null)
   const [logLines, setLogLines] = useState<string[]>([])
   const logCursorRef = useRef(0)
@@ -201,10 +197,6 @@ export default function App() {
     setSelectedId(taskId)
   }
 
-  const openSettings = () => {
-    setRightPanelTab('settings')
-  }
-
   const handleTaskCreated = async (taskId: string) => {
     const rows = await fetchTasks()
     setTasks(rows)
@@ -216,118 +208,38 @@ export default function App() {
     <>
       <div className="shell">
         <div className="panes">
-          <aside className="pane left">
-            <div className="left-head">
-              <h2 className="left-title">任务</h2>
-              <div className="left-head-actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={openSettings}
-                >
-                  系统设置
-                </button>
-                <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
-                  新建任务
-                </button>
-              </div>
-            </div>
-            {tasksErr && <p className="err">{tasksErr}</p>}
-            <ul className="task-list">
-              {tasks.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    className={
-                      t.id === selectedId && rightPanelTab === 'detail'
-                        ? 'task-row active'
-                        : 'task-row'
-                    }
-                    onClick={() => selectTask(t.id)}
-                    title={`${t.workflow_key} · ${t.id} · Run ${t.execution_count ?? 0} · ${formatWallSeconds(t.active_duration_seconds ?? 0)} active (excl. interrupt)`}
-                  >
-                    <span className="task-row-main">
-                      <span className="task-row-name">{displayTaskName(t)}</span>
-                      <span className={chipClass(t.status)}>{t.status}</span>
-                    </span>
-                    <span className="task-row-meta muted small">
-                      Run {t.execution_count ?? 0} · {formatWallSeconds(t.active_duration_seconds ?? 0)}{' '}
-                      active
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {!tasks.length && !tasksErr && <p className="muted">暂无任务</p>}
-          </aside>
+          <TaskList
+            tasks={tasks}
+            tasksErr={tasksErr}
+            selectedId={selectedId}
+            rightPanelTab={rightPanelTab}
+            onSelectTask={selectTask}
+            onOpenSettings={() => setRightPanelTab('settings')}
+            onOpenCreate={() => setModalOpen(true)}
+          />
           <main className="pane right">
             {rightPanelTab === 'settings' ? (
               <SettingsPanel />
+            ) : !selectedId ? (
+              <p className="muted">请从左侧选择任务。</p>
+            ) : detail ? (
+              <TaskDetail
+                detail={detail}
+                detailErr={detailErr}
+                nowTick={nowTick}
+                nodeActionErr={nodeActionErr}
+                rerunBusyNodeId={rerunBusyNodeId}
+                resolveDraft={resolveDraft}
+                resolveErr={resolveErr}
+                resolveBusy={resolveBusy}
+                logLines={logLines}
+                logsErr={logsErr}
+                onRerun={onRerunFromNode}
+                onResolve={onResolve}
+                onResolveDraftChange={setResolveDraft}
+              />
             ) : (
-              <>
-                {!selectedId && <p className="muted">请从左侧选择任务。</p>}
-                {selectedId && detailErr && <p className="err">{detailErr}</p>}
-                {detail && (
-              <>
-                <h2 className="task-detail-title">{displayTaskName(detail)}</h2>
-                <dl className="meta">
-                  <dt>Id</dt>
-                  <dd className="mono">{detail.id}</dd>
-                  <dt>Workflow</dt>
-                  <dd>
-                    {detail.workflow_key}{' '}
-                    <span className="muted">rev {detail.workflow_revision}</span>
-                  </dd>
-                  <dt>Status</dt>
-                  <dd>
-                    <span className={chipClass(detail.status)}>{detail.status}</span>
-                  </dd>
-                  <dt>Created at</dt>
-                  <dd>{formatTaskDisplayTime(detail.created_at)}</dd>
-                  <dt>Completed at</dt>
-                  <dd>
-                    {TASK_TERMINAL.has(detail.status)
-                      ? formatTaskDisplayTime(detail.updated_at)
-                      : '—'}
-                  </dd>
-                  <dt>Execution count</dt>
-                  <dd>{detail.execution_count ?? 0}</dd>
-                  <dt>Active duration</dt>
-                  <dd title="Wall time excluding waiting_human (interrupt)">
-                    {formatWallSeconds(detail.active_duration_seconds ?? 0)} (excl. interrupt)
-                  </dd>
-                </dl>
-
-                {hasDictContent(detail.input) && <KvBlock title="Input" data={detail.input} />}
-
-                {hasDictContent(detail.context) && (
-                  <KvBlock title="Context" data={detail.context} />
-                )}
-
-                <NodeStrip
-                  nodes={detail.nodes}
-                  nowTick={nowTick}
-                  taskStatus={detail.status}
-                  rerunBusyNodeId={rerunBusyNodeId}
-                  nodeActionErr={nodeActionErr}
-                  onRerun={onRerunFromNode}
-                />
-
-                {detail.interrupt && (
-                  <InterruptPanel
-                    interrupt={detail.interrupt}
-                    resolveDraft={resolveDraft}
-                    resolveErr={resolveErr}
-                    resolveBusy={resolveBusy}
-                    onResolveDraftChange={setResolveDraft}
-                    onResolve={onResolve}
-                  />
-                )}
-
-                <LogViewer logLines={logLines} logsErr={logsErr} />
-              </>
-                )}
-              </>
+              selectedId && detailErr && <p className="err">{detailErr}</p>
             )}
           </main>
         </div>
