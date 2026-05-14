@@ -29,7 +29,7 @@
 | **工作流（Workflow）** | 用户以 Python 描述的**串行**节点定义集合（顺序由注册顺序或显式列表表达）；含节点级产物路径、白名单、`interrupt` 标记等。 |
 | **任务（Task）** | 某工作流的一次运行实例；具独立**任务根目录**、独立 worker 进程边界、独立 DB 记录；`status` 见 **§8.1**。 |
 | **节点（Node）** | 最小执行单元；状态枚举见 **§8.2**（与任务状态 **§8.1** 配合）。 |
-| **人工介入（Interrupt）** | 节点执行至中断点时，持久化「期待输入」与 checkpoint；worker 退出；用户经 HTTP  Submit 后 **resume**。 |
+| **人工介入（Interrupt）** | 节点执行至中断点，按 **§3.4** 落库；经 `interrupt/resolve` 后同节点可重入继续；**不**在 interrupt 点生成该节点 zip。 |
 
 ---
 
@@ -60,6 +60,193 @@
 - **大段日志**：主要落盘文件；DB 存路径、offset 或分片索引（实现计划细化）。  
 - **并发**：SQLite WAL；短事务；避免在 DB 存整段日志正文。
 
+### 3.4 Interrupt（人工介入）：定稿设计与伪代码约束
+
+本节固定 **interrupt → 落库 → worker 退出 → HTTP resolve → 新 worker resume** 的契约；实现 **必须** 遵守下列字段含义、顺序与伪代码控制流（可用等价实现，但不得削弱约束）。
+
+#### 3.4.1 核心语义（与 LangGraph「interrupt」对齐的目标）
+
+- interrupt **只发生在某一节点的执行轮次内**；触发后该节点 **不得** 进入 `success`，也 **不得** 生成该节点级 **zip 快照**（节点成功收尾流程尚未发生）。  
+- interrupt **之前**节点已写入**任务根目录下**磁盘的文件 **视为已保留**；resume **不得**清空任务目录（与 `rerun` 区分）。  
+- **跨 worker 世代不得依赖进程内内存**：resume 只能通过 **DB 中的 resolve payload + 磁盘状态** + **节点函数入口重入** 继续逻辑。  
+- **同一任务在任一时间至多一个「未关闭的 interrupt」**：`task.status == waiting_human` 时，不得并发第二次 interrupt。
+
+#### 3.4.2 持久化逻辑模型（实现可拆表或 JSON 列，语义须一致）
+
+以下字段为 **逻辑必填**（名称可映射为蛇形列名或嵌套 JSON）：
+
+| 字段 | 说明 |
+|------|------|
+| `interrupt_seq` | 单调递增整数（**每任务**）。每进入一次新的 `waiting_human` **打开**一轮 interrupt 时 `+1`；用于 resolve **幂等与防重放**。 |
+| `interrupt_node_id` | 当前等待人工输入的节点 id。 |
+| `interrupt_expected_schema` | `JSON Schema`（对象或 `null` 表示仅校验非空 JSON）。resolve body **必须通过**该 schema。 |
+| `interrupt_request_extras` | 可选 JSON，仅作 UI 提示（标题、字段说明），**不参与**引擎校验逻辑。 |
+| `interrupt_response_payload` | resolve 成功后写入的用户 JSON；worker **消费一次**后须清除或标记已消费（见伪代码）。 |
+| `interrupt_response_consumed` | 布尔。新 worker 世代已将 `human_input` 注入上下文并成功**再次调用**节点入口后置 `true` 并清空 payload（或等价状态机）。 |
+
+**约定：** `interrupt_seq` **初始**为 `0`；每发生一次「打开 `waiting_human`」的事务提交，`interrupt_seq` **增 1**；客户端可在 resolve 时携带当前 `seq` 做幂等。
+
+**可选** `interrupt_checkpoint`（opaque JSON）：节点在调用 `interrupt()` 时传入、原样在 GET API 中回显给 UI；**引擎不解释**。若节点逻辑完全可由「目录 + `human_input`」恢复，可省略。
+
+#### 3.4.3 工作流侧库 API（用户代码约束，伪代码）
+
+引擎须提供 **可在节点可执行代码路径内调用** 的 `interrupt()`；其行为必须是「**把请求交给 runner 并结束本 worker 世代**」，**不得**假装异步等待 HTTP。
+
+```text
+// 约束 INV-A：interrupt 调用点之后直到函数返回的代码，在本 worker 世代内 **不得再执行**
+//（因进程即将退出；后续逻辑必须在「携带 human_input 的重入路径」上完成）。
+
+interrupt(
+  *,
+  expected_schema: object | null,
+  ui: object | null = null,
+  checkpoint: object | null = null,
+) -> Never
+
+NodeContext:
+  task_id: str
+  workflow_id: str
+  node_id: str
+  task_root: Path
+  // 仅当本世代为 resolve 后的第一次节点调用、且目标节点匹配时：
+  human_input: object | null
+```
+
+**约束 INV-B（节点可重入）**：对于声明了 interrupt 的节点，用户实现 **必须** 服从：
+
+```text
+PROC UserNode(node_ctx):
+  // 推荐模式（同一进程内两次调用，第二次为 resume 重入）：
+  IF node_ctx.human_input IS NOT NULL:
+     // 继续路径：不得再次无条件 interrupt
+     FinishWorkUsing(node_ctx.human_input)
+     RETURN
+  // 首跑路径：
+  interrupt(expected_schema := ..., ui := ..., checkpoint := ...)
+  // 不可达
+```
+
+实现 **允许**在一次节点执行中多次检查 `human_input`；但 **不得**在未消费 resolve 的世代里将节点标 `success`。
+
+#### 3.4.4 Runner / Worker 伪代码（规范）
+
+```text
+PROC WorkerMain(task_id, worker_generation_id):
+  ASSERT AcquireTaskWorkerLease(task_id) // 同一 task 仅一活跃 worker
+
+  task := LoadTask(task_id)
+
+  IF task.status == "waiting_human":
+     FailFast("illegal spawn: waiting_human shall have no active worker")
+
+  node_cursor := DetermineNextNode(task) // 串行：首个 pending；resume 时仍为 interrupt_node_id
+
+  human := NULL
+  IF task.interrupt_response_payload IS NOT NULL AND NOT task.interrupt_response_consumed:
+     human := task.interrupt_response_payload
+
+  FOR node IN WorkflowNodesFrom(workflow, start := node_cursor):
+    SetTaskStatus("running")
+    SetNodeStatus(node, "running")
+
+    ctx := BuildNodeContext(task, node, human_input := human)
+
+    TRY:
+       RunUserCallable(node.fn, ctx)
+    CATCH ControlledInterrupt AS c:
+       // 由 interrupt() 触发，非用户未捕获异常
+       OPEN_TX:
+          task.interrupt_seq += 1
+          task.interrupt_node_id := node.id
+          task.interrupt_expected_schema := c.expected_schema
+          task.interrupt_request_extras := c.ui
+          task.interrupt_checkpoint := c.checkpoint  // 可选
+          task.interrupt_response_payload := NULL
+          task.interrupt_response_consumed := false
+          SetNodeStatus(node, "waiting_human")
+          SetTaskStatus("waiting_human")
+          RecordWorkerExit(task_id, worker_generation_id, reason := "interrupt")
+       COMMIT_TX
+       ReleaseTaskWorkerLease(task_id)
+       EXIT_PROCESS 0
+
+    CATCH Any AS e:
+       // 业务失败路径（非 interrupt）
+       SetNodeStatus(node, "failed", error := e)
+       SetTaskStatus("failed")
+       ReleaseTaskWorkerLease(task_id)
+       EXIT_PROCESS 1
+
+    // 用户函数正常返回：本节点完成
+    IF human IS NOT NULL AND node.id == task.interrupt_node_id:
+       // resolve 已被用于完成该节点剩余工作
+       SET interrupt_response_consumed := true
+       CLEAR interrupt_response_payload
+       SET human := NULL
+
+    FinalizeNodeSuccess(node)  // 见下
+    IF node IS LAST:
+       SetTaskStatus("succeeded")
+
+  ReleaseTaskWorkerLease(task_id)
+  EXIT_PROCESS 0
+
+PROC FinalizeNodeSuccess(node):
+  // 约束 INV-C：仅在此 PROC 内生成该节点 zip 与 success
+  AssertWorkspaceWhitelistOrFail(node)
+  WriteNodeZipSnapshot(node)
+  SetNodeStatus(node, "success")
+```
+
+**说明：** `RunUserCallable` 若检测到 `human` 已注入且节点已完成「继续路径」，应正常返回；随后 `FinalizeNodeSuccess` 才写 zip。若 `interrupt()` 在首跑路径被调用，控制流 **永不**到达 `FinalizeNodeSuccess` 同一世代内。
+
+#### 3.4.5 HTTP `POST /tasks/{id}/interrupt/resolve`（请求体与伪代码）
+
+**请求体 JSON 形状（固定）：**
+
+```json
+{
+  "interrupt_seq": 3,
+  "payload": { }
+}
+```
+
+- `interrupt_seq`：**可选**，但若提供则 **必须** 与当前 `task.interrupt_seq` 一致，否则 **409**。  
+- `payload`：**必须**；`interrupt_expected_schema` **仅约束 `payload`**。若 `expected_schema` 为 `null`，引擎 **仅校验** `payload` 为 JSON 对象且非 `null`（具体可放宽为「任意合法 JSON」，由实现计划二选一并在验收用例中固定）。
+
+```text
+PROC ApiInterruptResolve(task_id, request_body):
+  task := LoadTask(task_id)
+  ASSERT task.status == "waiting_human"
+  seq := request_body.interrupt_seq  // OPTIONAL
+  IF seq IS NOT NULL AND seq != task.interrupt_seq:
+     RETURN 409 CONFLICT
+  p := request_body.payload
+  ASSERT JsonValidates(p, task.interrupt_expected_schema)
+
+  OPEN_TX:
+     task.interrupt_response_payload := p  // 注意：存入的是 payload，而非外包一层
+     task.interrupt_response_consumed := false
+     task.status := "running"
+     BumpWorkerGeneration(task_id)
+  COMMIT_TX
+
+  SpawnWorker(task_id)
+  RETURN 202 Accepted
+```
+
+**约束：** resolve **不得**在 `task.status != waiting_human` 时成功（除非实现明确支持幂等重复提交同一 payload，且语义等价 no-op；若不支持则返回 409）。
+
+#### 3.4.6 Supervisor 不变式
+
+- `waiting_human` 状态下：**无**活跃 worker pid 与 lease。  
+- `running` 状态下：要么正在 spawn，要么存在合法 lease + 存活检测中的 worker。  
+- resolve 事务提交 **`先于`** `SpawnWorker`；崩溃恢复时若 payload 已写但 worker 未起，由 **supervisor 补拉起**（实现计划中的可靠性条目）。
+
+#### 3.4.7 与 `rerun` 的交互（约束）
+
+- 当 `task.status == waiting_human`，**默认拒绝** `rerun`，或要求实现先 **取消** interrupt（显式 API，YAGNI 可先拒绝并 409）。避免「目录语义」与未闭合人工输入冲突。
+
 ---
 
 ## 4. 产物目录、白名单与快照
@@ -85,7 +272,7 @@
 | `GET` | `/tasks/{id}` | 任务元信息 + **`nodes: [...]`** 数组（**顺序即流程图**），元素含节点 id、状态、起止时间、耗时、zip 路径摘要等。 |
 | `GET` | `/tasks/{id}/logs` | 日志流（支持 cursor 分页）。 |
 | `POST` | `/tasks` | 创建并启动任务（body 指定已注册工作流 key、输入 payload 等）。 |
-| `POST` | `/tasks/{id}/interrupt/resolve` | 提交人工参数，触发 **resume**（spawn 新一代 worker）。 |
+| `POST` | `/tasks/{id}/interrupt/resolve` | body：`{ "interrupt_seq"?: int, "payload": object }`（见 **§3.4.5**）；成功后 `task`→`running` 并 spawn worker。 |
 | `POST` | `/tasks/{id}/rerun` | body：`{ "from_node_id": "K" }`，触发 **清空 + 前置 zip 解压 + 从 K 执行**。 |
 
 **并发语义：`rerun` 与运行中 worker** 的互斥策略须在实现中写死一种（例如仅 `非 running` 允许，或先取消再 `rerun`），并在该文档的实现计划阶段落到验收用例。
@@ -174,6 +361,7 @@ failed ──（可选）经人工 rerun 自某节点──► running；实现�
 ### 8.3 HTTP / JSON 字段约束
 
 - `GET /tasks/{id}` 响应中：**必须**包含 `status`（任务，取值 §8.1）与 **`nodes` 数组**；每项 **必须**包含 `node_id`（或等价主键）与 `status`（取值 §8.2）。  
+- 当 `status == "waiting_human"` 时 **必须**包含 **`interrupt`** 对象，字段至少包括：`seq`（等于 `interrupt_seq`）、`node_id`、`expected_schema`、`request_extras`（可空）、`checkpoint`（可空），语义见 **§3.4.2**。  
 - 节点处于 `failed` 时 **建议**包含 `error: { "category": "business" | "validation" | "worker_lost", "message": string }`，便于控制台区分「业务失败」与 **stalled 链路上的节点失败**。  
 - 任务处于 `failed` / `stalled` / `waiting_human` 时 **建议**包含人类可读 `message` 或结构化 `blocking_reason`（实现计划可选）。
 
@@ -203,7 +391,7 @@ failed ──（可选）经人工 rerun 自某节点──► running；实现�
 | 持久化 | SQLite WAL |
 | 快照 | 每成功节点 zip；白名单；软忽略多写；**缺件硬失败** |
 | 多任务 | 每任务独立进程 |
-| interrupt | 落库 + worker 退出；resume 同目录继续 |
+| interrupt | 语义、持久化、resolve 请求体、Runner/Supervisor 伪代码见 **§3.4** |
 | 中途重跑 | 清空 + 顺序解压前置 zip |
 | 任务拓扑 | 串行；`GET /tasks/{id}` 返回 `nodes` 数组，无单独 graph 接口 |
 | 任务/节点状态 | 枚举、不变式、合法迁移与 DTO 约束见 **§8** |
@@ -216,3 +404,4 @@ failed ──（可选）经人工 rerun 自某节点──► running；实现�
 |------|------|
 | 2026-05-14 | 初版：合并 brainstorming 第 1–3 节与用户修订（库注册、resume/rerun 目录语义、去掉 graph 接口）。 |
 | 2026-05-14 | 增补 **§8**：任务/节点状态枚举、不变式、合法迁移、`rerun` 节点数组重置、HTTP 字段约束；**§2**/**§10** 与 §8 对齐。 |
+| 2026-05-14 | 新增 **§3.4**：interrupt 定稿（持久化字段、可重入约束、Runner/HTTP/Supervisor 伪代码、与 `rerun` 互斥）；**§5**/**§8.3**/**§10** 对齐。 |
