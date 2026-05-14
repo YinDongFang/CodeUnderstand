@@ -123,6 +123,85 @@
   color: #58a6ff;
 }
 
+.node-strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  padding: 0.35rem 0 1rem;
+  margin: 0 0 0.75rem;
+  scrollbar-color: #30363d #0d1117;
+}
+
+.node-sep {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0 0.35rem;
+  color: #484f58;
+  font-size: 1.1rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.node-card {
+  flex: 0 0 auto;
+  min-width: 148px;
+  max-width: 220px;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.node-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.node-card-ord {
+  font-size: 0.7rem;
+  color: #6e7681;
+  flex-shrink: 0;
+}
+
+.node-card-id {
+  font-weight: 600;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-card .chip {
+  align-self: flex-start;
+}
+
+.node-card-time {
+  font-size: 0.72rem;
+  color: #8b949e;
+  line-height: 1.35;
+}
+
+.node-card-time-sub {
+  font-family: ui-monospace, monospace;
+  font-size: 0.68rem;
+  color: #6e7681;
+}
+
+.node-card-err {
+  margin-top: 0.15rem;
+  color: #f85149;
+  font-size: 0.68rem;
+  word-break: break-word;
+}
+
 .meta {
   display: grid;
   grid-template-columns: 8rem 1fr;
