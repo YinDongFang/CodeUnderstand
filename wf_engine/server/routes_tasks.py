@@ -12,13 +12,13 @@ from jsonschema.exceptions import ValidationError
 from pydantic import BaseModel, Field
 
 from wf_engine import status as S
-from wf_engine.utils.lease_util import parse_utc_iso, pid_alive
-from wf_engine.utils.paths import task_layout
+from wf_engine.utils.lease import parse_utc_iso, pid_alive
+from wf_engine.utils.task_layout import task_layout
 from wf_engine.utils.sandbox import resolve_node_workdir
 from wf_engine.server.paths_util import effective_tasks_root
 from wf_engine.server.state import ControlPlaneState
 from wf_engine.task_timing import compute_active_duration_seconds
-from wf_engine.utils.unzip_util import UnsafeArchiveError, extract_zip_safely
+from wf_engine.utils.archives import UnsafeArchiveError, extract_zip_bytes
 
 router = APIRouter()
 
@@ -390,7 +390,10 @@ def rerun_task(request: Request, task_id: str, body: RerunBody) -> dict[str, str
                     ),
                 )
             dest_dir = resolve_node_workdir(layout.workspace, spec.workdir_relative)
-            extract_zip_safely(Path(zip_path).read_bytes(), dest_dir)
+            extract_zip_bytes(
+                archive_bytes=Path(zip_path).read_bytes(),
+                dest_dir=dest_dir,
+            )
     except UnsafeArchiveError as e:
         cp.store.set_task_status(task_id, S.TASK_FAILED)
         raise HTTPException(

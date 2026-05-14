@@ -9,17 +9,17 @@ from pathlib import Path
 from wf_engine import status as S
 from wf_engine.context import NodeContext
 from wf_engine.interrupt import ControlledInterrupt
-from wf_engine.utils.lease_util import utc_iso_after
-from wf_engine.utils.log_markers import format_run_begin
-from wf_engine.utils.paths import task_layout
-from wf_engine.utils.sandbox import resolve_node_workdir
-from wf_engine.store.sqlite import SqliteStore, _utc_iso
-from wf_engine.workflow import Workflow
-from wf_engine.utils.zip_util import (
+from wf_engine.utils.archives import (
     WhitelistPackError,
     pack_whitelist_zip,
     warn_extraneous_workspace_files,
 )
+from wf_engine.utils.lease import utc_iso_after
+from wf_engine.utils.log_markers import format_run_begin
+from wf_engine.utils.sandbox import resolve_node_workdir
+from wf_engine.utils.task_layout import task_layout
+from wf_engine.store.sqlite import SqliteStore, _utc_iso
+from wf_engine.workflow import Workflow
 
 wf_log_node: contextvars.ContextVar[str] = contextvars.ContextVar("wf_log_node", default="")
 

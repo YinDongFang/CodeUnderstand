@@ -1,5 +1,8 @@
+"""Zip read/write helpers (whitelist packing, zip-slip–safe extract)."""
+
 from __future__ import annotations
 
+import io
 import logging
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -13,6 +16,14 @@ class WhitelistPackError(ValueError):
     def __init__(self, message: str, *, patterns: tuple[str, ...]) -> None:
         super().__init__(message)
         self.patterns = patterns
+
+
+class UnsafeArchiveError(ValueError):
+    """Archive entry path escapes ``dest_dir`` (zip-slip)."""
+
+    def __init__(self, entry_name: str) -> None:
+        super().__init__(f"unsafe archive path: {entry_name!r}")
+        self.entry_name = entry_name
 
 
 def pack_whitelist_zip(
@@ -67,12 +78,30 @@ def warn_extraneous_workspace_files(
     """Log warning for files under ``node_workdir`` not included in the snapshot (spec §4 soft B)."""
     if not node_workdir.is_dir():
         return
-    for p in node_workdir.rglob("*"):
-        if not p.is_file():
+    for path in node_workdir.rglob("*"):
+        if not path.is_file():
             continue
-        rel = p.relative_to(node_workdir).as_posix()
+        rel = path.relative_to(node_workdir).as_posix()
         if rel not in packed_rel_paths:
             log.warning(
                 "non-whitelist file in node workdir (not packed): %s",
                 rel,
             )
+
+
+def extract_zip_bytes(*, archive_bytes: bytes, dest_dir: Path) -> None:
+    """Expand a zip byte payload into ``dest_dir``; reject paths that escape ``dest_dir``."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    base = dest_dir.resolve()
+    with ZipFile(io.BytesIO(archive_bytes)) as zf:
+        for member_name in zf.namelist():
+            target_path = (dest_dir / member_name).resolve()
+            try:
+                target_path.relative_to(base)
+            except ValueError:
+                raise UnsafeArchiveError(member_name) from None
+            if member_name.endswith("/"):
+                target_path.mkdir(parents=True, exist_ok=True)
+            else:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(zf.read(member_name))

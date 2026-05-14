@@ -6,7 +6,7 @@ from pathlib import Path
 
 from wf_engine import status as S
 from wf_engine.engine import Engine
-from wf_engine.utils.paths import task_layout
+from wf_engine.utils.task_layout import task_layout
 from wf_engine.runner import run_once
 from wf_engine.store.sqlite import SqliteStore
 from wf_engine.workflow import Workflow

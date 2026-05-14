@@ -5,7 +5,7 @@ import tempfile
 from wf_engine import status as S
 from wf_engine.context import NodeContext
 from wf_engine.interrupt import interrupt
-from wf_engine.utils.paths import task_layout
+from wf_engine.utils.task_layout import task_layout
 from wf_engine.runner import run_once
 from wf_engine.store.sqlite import SqliteStore
 from wf_engine.workflow import Workflow

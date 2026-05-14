@@ -1,10 +1,16 @@
-import zipfile
+import io
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pytest
 
-from wf_engine.utils.zip_util import WhitelistPackError, pack_whitelist_zip
+from wf_engine.utils.archives import (
+    UnsafeArchiveError,
+    WhitelistPackError,
+    extract_zip_bytes,
+    pack_whitelist_zip,
+)
 
 
 def test_pack_whitelist_includes_only_matches():
@@ -26,3 +32,14 @@ def test_pack_whitelist_raises_when_pattern_misses():
         z = root / "out.zip"
         with pytest.raises(WhitelistPackError):
             pack_whitelist_zip(parent=root, include_globs=("missing.txt",), dest_zip=z)
+
+
+def test_extract_rejects_zip_slip():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("../evil.txt", "x")
+    buf.seek(0)
+    with tempfile.TemporaryDirectory() as td:
+        dest = Path(td)
+        with pytest.raises(UnsafeArchiveError):
+            extract_zip_bytes(archive_bytes=buf.getvalue(), dest_dir=dest)

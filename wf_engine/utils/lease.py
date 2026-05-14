@@ -10,10 +10,11 @@ def utc_iso_after(*, seconds: int) -> str:
     )
 
 
-def parse_utc_iso(s: str) -> datetime:
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    return datetime.fromisoformat(s)
+def parse_utc_iso(iso_timestamp: str) -> datetime:
+    text = iso_timestamp
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    return datetime.fromisoformat(text)
 
 
 def pid_alive(pid: int) -> bool:
