@@ -28,6 +28,30 @@ function formatTaskDisplayTime(iso: string | null | undefined): string {
 }
 
 const LOG_NODE_MARKER = /\[\d+:[^\]]+\]/
+const LOG_RUN_BEGIN = 'WF_ENGINE_RUN_BEGIN'
+
+/** Split tail buffer into runs; each new ``WF_ENGINE_RUN_BEGIN`` starts a segment (backend ``run_once``). */
+function splitLogLinesIntoRuns(lines: string[]): string[][] {
+  const runs: string[][] = []
+  let cur: string[] = []
+  for (const line of lines) {
+    if (line.includes(LOG_RUN_BEGIN) && cur.length > 0) {
+      runs.push(cur)
+      cur = []
+    }
+    cur.push(line)
+  }
+  if (cur.length) runs.push(cur)
+  return runs
+}
+
+function logRunTitle(runLines: string[], runIndex: number, totalRuns: number): string {
+  const first = runLines[0] ?? ''
+  const m = first.match(/WF_ENGINE_RUN_BEGIN generation=(\d+)/)
+  if (m) return `运行 · worker_generation ${m[1]}`
+  if (totalRuns === 1) return '日志'
+  return runIndex === 0 ? '早期日志（无运行标记）' : `分段 ${runIndex + 1}`
+}
 
 /** Group log lines by first `[ordinal:node_id]` marker per line (worker inserts in each line); unprefixed lines stay in ``current`` bucket (starts as 全局). */
 function groupLogLines(lines: string[]): Array<{ title: string; lines: string[] }> {
@@ -495,7 +519,7 @@ export default function App() {
     }
   }
 
-  const logGroups = groupLogLines(logLines)
+  const logRuns = splitLogLinesIntoRuns(logLines)
 
   return (
     <>
@@ -648,15 +672,38 @@ export default function App() {
                 {!logLines.length && !logsErr && <pre className="logs logs-empty">—</pre>}
                 {logLines.length > 0 && (
                   <div className="log-panel">
-                    {logGroups.map((g, i) => (
-                      <details key={`${g.title}-${i}`} className="log-block">
-                        <summary className="log-summary">
-                          <span className="log-summary-label">{g.title}</span>
-                          <span className="muted log-summary-meta">{g.lines.length} 行</span>
-                        </summary>
-                        <pre className="log-block-body">{g.lines.join('\n')}</pre>
-                      </details>
-                    ))}
+                    {logRuns.map((runLines, ri) => {
+                      const nodeGroups = groupLogLines(runLines)
+                      const runTitle = logRunTitle(runLines, ri, logRuns.length)
+                      const isLatest = ri === logRuns.length - 1
+                      return (
+                        <details
+                          key={`run-${ri}-${runLines.length}-${runLines[0]?.slice(0, 48) ?? ''}`}
+                          className="log-run"
+                          open={isLatest}
+                        >
+                          <summary className="log-run-summary">
+                            <span className="log-run-title">{runTitle}</span>
+                            <span className="muted log-summary-meta">{runLines.length} 行</span>
+                          </summary>
+                          <div className="log-run-body">
+                            {nodeGroups.map((g, i) => (
+                              <details
+                                key={`${ri}-${g.title}-${i}`}
+                                className="log-block"
+                                open={isLatest}
+                              >
+                                <summary className="log-summary">
+                                  <span className="log-summary-label">{g.title}</span>
+                                  <span className="muted log-summary-meta">{g.lines.length} 行</span>
+                                </summary>
+                                <pre className="log-block-body">{g.lines.join('\n')}</pre>
+                              </details>
+                            ))}
+                          </div>
+                        </details>
+                      )
+                    })}
                   </div>
                 )}
               </>

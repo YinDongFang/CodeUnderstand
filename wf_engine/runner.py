@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import contextvars
 import copy
+import os
+from datetime import datetime
 from pathlib import Path
 
 from wf_engine import status as S
 from wf_engine.context import NodeContext
 from wf_engine.interrupt import ControlledInterrupt
 from wf_engine.lease_util import utc_iso_after
+from wf_engine.log_markers import format_run_begin
 from wf_engine.paths import task_layout
 from wf_engine.sandbox import resolve_node_workdir
 from wf_engine.store.sqlite import SqliteStore, _utc_iso
@@ -15,6 +18,19 @@ from wf_engine.workflow import Workflow
 from wf_engine.zip_util import WhitelistPackError, pack_whitelist_zip, warn_extraneous_workspace_files
 
 wf_log_node: contextvars.ContextVar[str] = contextvars.ContextVar("wf_log_node", default="")
+
+
+def _append_task_log_line(
+    task_root: Path, *, logger_name: str, level: str, message: str
+) -> None:
+    """Append one line in the same pipe shape as ``worker_main`` file logging."""
+    log_dir = task_layout(task_root).logs
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / "task.log"
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"{ts} | {level} |  | {logger_name} | {message}\n"
+    with path.open("a", encoding="utf-8") as f:
+        f.write(line)
 
 
 def run_once(
@@ -38,6 +54,18 @@ def run_once(
     layout = task_layout(task_root)
     layout.workspace.mkdir(parents=True, exist_ok=True)
     layout.zips.mkdir(parents=True, exist_ok=True)
+
+    pid = worker_pid if worker_pid is not None else os.getpid()
+    _append_task_log_line(
+        task_root,
+        logger_name="wf_engine.runner",
+        level="INFO",
+        message=format_run_begin(
+            generation=int(task["worker_generation"]),
+            pid=pid,
+            task_id=task_id,
+        ),
+    )
 
     node_rows = store.list_nodes(task_id)
     num = len(workflow.nodes)
