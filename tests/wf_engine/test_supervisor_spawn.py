@@ -47,10 +47,19 @@ def test_supervisor_spawns_worker_and_task_succeeds() -> None:
             cwd=repo_root,
         )
         try:
-            ret = proc.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            raise
-        assert ret == 0
-        assert store.get_task(task_id)["status"] == S.TASK_SUCCEEDED
-        assert (layout.workspace / "touched.txt").read_text(encoding="utf-8") == "ok"
+            try:
+                ret = proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=10)
+                raise
+            assert ret == 0
+            assert store.get_task(task_id)["status"] == S.TASK_SUCCEEDED
+            assert (layout.workspace / "touched.txt").read_text(encoding="utf-8") == "ok"
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
