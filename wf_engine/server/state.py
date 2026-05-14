@@ -13,5 +13,4 @@ class ControlPlaneState:
     engine: Engine
     store: SqliteStore
     tasks_root: Path
-    registry_module: str | None
     spawn_worker_fn: Callable[..., Any]

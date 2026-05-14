@@ -41,7 +41,6 @@ def test_supervisor_spawns_worker_and_task_succeeds() -> None:
             task_id=task_id,
             task_root=tr,
             workflow_key="supervisor_spawn_wf",
-            registry_module="tests.wf_engine._registry_fixtures",
             extra_env=extra,
             cwd=repo_root,
         )

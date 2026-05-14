@@ -150,7 +150,6 @@ def _spawn_for_task(
         task_id=task_id,
         task_root=_task_root(cp, task_id),
         workflow_key=workflow_key,
-        registry_module=cp.registry_module,
     )
 
 

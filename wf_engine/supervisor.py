@@ -15,7 +15,6 @@ def spawn_worker(
     task_id: str,
     task_root: Path | str,
     workflow_key: str,
-    registry_module: str | None = None,
     extra_env: dict[str, str] | None = None,
     cwd: Path | str | None = None,
     **popen_kwargs: Any,
@@ -26,8 +25,6 @@ def spawn_worker(
     merged["WF_ENGINE_TASK_ID"] = task_id
     merged["WF_ENGINE_TASK_ROOT"] = str(Path(task_root).resolve())
     merged["WF_ENGINE_WORKFLOW_KEY"] = workflow_key
-    if registry_module:
-        merged["WF_ENGINE_REGISTRY_MODULE"] = registry_module
     if extra_env:
         merged.update(extra_env)
 

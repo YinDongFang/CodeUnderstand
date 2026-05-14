@@ -29,7 +29,7 @@ def settings_api_app(tmp_path: Path):
     wf.add_node("s", n1)
     eng.register_workflow(wf)
 
-    app = create_app(eng, store, tmp_path / "runs", registry_module=None)
+    app = create_app(eng, store, tmp_path / "runs", )
     return {"app": app, "store": store}
 
 
@@ -90,7 +90,7 @@ def test_settings_put_relative_root_creates_home_relative_dir(tmp_path: Path, mo
 
     wf.add_node("s", n1)
     eng.register_workflow(wf)
-    app = create_app(eng, store, tmp_path / "runs_default", registry_module=None)
+    app = create_app(eng, store, tmp_path / "runs_default", )
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     custom_relative = "nested/custom_tasks"

@@ -18,7 +18,6 @@ def create_app(
     engine: Engine,
     store: SqliteStore,
     tasks_root: Path,
-    registry_module: str | None = None,
     *,
     spawn_worker_fn: Callable[..., Any] | None = None,
 ) -> FastAPI:
@@ -44,7 +43,6 @@ def create_app(
         engine=engine,
         store=store,
         tasks_root=Path(tasks_root).resolve(),
-        registry_module=registry_module,
         spawn_worker_fn=spawn_worker_fn or spawn_worker,
     )
     app.include_router(routes_tasks.router)

@@ -23,7 +23,7 @@ from wf_engine.workflow import Workflow
 
 
 def _sync_spawn(engine: Engine, store: SqliteStore):
-    def _spawn(*, db_path, task_id, task_root, workflow_key, registry_module=None, extra_env=None, cwd=None, **kwargs):
+    def _spawn(*, db_path, task_id, task_root, workflow_key, extra_env=None, cwd=None, **kwargs):
         wf = engine.get_workflow(workflow_key)
         run_once(store=store, workflow=wf, task_id=task_id, task_root=Path(task_root))
 

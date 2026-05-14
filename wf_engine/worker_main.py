@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 import sys
@@ -40,16 +39,6 @@ def _configure_task_file_logging(task_root: Path) -> None:
     root.addHandler(handler)
 
 
-def _load_registry(engine: Engine) -> None:
-    mod_path = os.environ.get("WF_ENGINE_REGISTRY_MODULE")
-    if not mod_path:
-        return
-    mod = importlib.import_module(mod_path)
-    register_all = getattr(mod, "register_all", None)
-    if register_all is None:
-        msg = f"registry module {mod_path!r} has no register_all(engine: Engine)"
-        raise RuntimeError(msg)
-    register_all(engine)
 
 
 def main() -> int:
@@ -60,7 +49,7 @@ def main() -> int:
         workflow_key = os.environ["WF_ENGINE_WORKFLOW_KEY"]
 
         engine = Engine()
-        _load_registry(engine)
+        engine.discover_workflows()
         workflow = engine.get_workflow(workflow_key)
 
         store = SqliteStore(db_path)

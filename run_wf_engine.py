@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""本地启动 wf_engine 控制面，并注册 ``workflow.demo`` 示例工作流。
+"""本地启动 wf_engine 控制面。
+
+自动发现 ``workflow/`` 目录下的所有工作流模块，无需手动导入注册。
 
 运行（仓库根目录）::
 
@@ -18,8 +20,6 @@ from pathlib import Path
 
 from wf_engine import Engine
 
-from workflow.demo import register_all
-
 
 def main() -> None:
     root = Path(__file__).resolve().parent
@@ -27,14 +27,12 @@ def main() -> None:
     data.mkdir(parents=True, exist_ok=True)
 
     engine = Engine()
-    register_all(engine)
 
     engine.serve(
         host="127.0.0.1",
         port=8000,
         db_path=data / "wf_engine.sqlite",
         tasks_root=data / "tasks",
-        registry_module="workflow.demo",
     )
 
 
