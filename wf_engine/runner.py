@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 from wf_engine import status as S
@@ -27,6 +28,9 @@ def run_once(
         raise KeyError(task_id)
     if task["status"] == S.TASK_WAITING_HUMAN:
         return
+
+    snapshot_input = copy.deepcopy(task["input_json"])
+    shared_context = copy.deepcopy(task.get("context_json") or {})
 
     layout = task_layout(task_root)
     layout.workspace.mkdir(parents=True, exist_ok=True)
@@ -97,12 +101,15 @@ def run_once(
             workspace=layout.workspace,
             node_workdir=node_workdir,
             human_input=human_input,
+            input=snapshot_input,
+            context=shared_context,
         )
         injected_human = human_input is not None
 
         try:
             spec.fn(ctx)
         except ControlledInterrupt as c:
+            store.save_task_context(task_id, shared_context)
             store.open_interrupt(
                 task_id,
                 node_id=spec.id,
@@ -119,6 +126,7 @@ def run_once(
             store.release_lease(task_id)
             return
         except Exception as e:
+            store.save_task_context(task_id, shared_context)
             store.update_node(
                 task_id,
                 ordinal,
@@ -129,6 +137,8 @@ def run_once(
             store.set_task_status(task_id, S.TASK_FAILED)
             store.release_lease(task_id)
             return
+        else:
+            store.save_task_context(task_id, shared_context)
 
         globs = tuple(spec.whitelist_globs)
         dest_zip = layout.zips / f"{ordinal}_{spec.id}.zip"

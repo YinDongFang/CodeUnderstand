@@ -14,3 +14,5 @@ class NodeContext:
     workspace: Path
     node_workdir: Path
     human_input: dict[str, Any] | None
+    input: dict[str, Any]
+    context: dict[str, Any]
