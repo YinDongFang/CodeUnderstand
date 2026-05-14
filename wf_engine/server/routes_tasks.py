@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from wf_engine import status as S
 from wf_engine.lease_util import parse_utc_iso, pid_alive
 from wf_engine.paths import task_layout
+from wf_engine.sandbox import resolve_node_workdir
 from wf_engine.server.state import ControlPlaneState
 from wf_engine.unzip_util import UnsafeArchiveError, extract_zip_safely
 
@@ -325,12 +326,44 @@ def rerun_task(request: Request, task_id: str, body: RerunBody) -> dict[str, str
                 detail=_err("missing_snapshot", f"snapshot zip missing on disk: {zip_path}"),
             )
 
+    try:
+        wf = cp.engine.get_workflow(row["workflow_key"])
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=_err(
+                "unknown_workflow",
+                f"workflow_key not registered: {row['workflow_key']!r}",
+            ),
+        ) from None
+
     layout = task_layout(_task_root(cp, task_id))
     _clear_workspace_contents(layout.workspace)
 
+    node_rows = cp.store.list_nodes(task_id)
     try:
-        for _, zip_path in snapshots:
-            extract_zip_safely(Path(zip_path).read_bytes(), layout.workspace)
+        # Zips are packed relative to each node's workdir; extract into the same path
+        # under workspace so downstream nodes see e.g. workspace/n1/out.txt.
+        for snap_ordinal, zip_path in snapshots:
+            if snap_ordinal < 0 or snap_ordinal >= len(wf.nodes):
+                raise HTTPException(
+                    status_code=500,
+                    detail=_err(
+                        "snapshot_ordinal_mismatch",
+                        f"snapshot ordinal {snap_ordinal} out of range for workflow",
+                    ),
+                )
+            spec = wf.nodes[snap_ordinal]
+            if snap_ordinal >= len(node_rows) or spec.id != node_rows[snap_ordinal]["node_id"]:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_err(
+                        "node_id_mismatch",
+                        "task node_id order does not match registered workflow",
+                    ),
+                )
+            dest_dir = resolve_node_workdir(layout.workspace, spec.workdir_relative)
+            extract_zip_safely(Path(zip_path).read_bytes(), dest_dir)
     except UnsafeArchiveError as e:
         cp.store.set_task_status(task_id, S.TASK_FAILED)
         raise HTTPException(

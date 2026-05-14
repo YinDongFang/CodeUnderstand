@@ -103,6 +103,63 @@ def _clear_workspace_for_test(ws: Path) -> None:
             shutil.rmtree(p)
 
 
+@pytest.fixture
+def nested_workdir_setup(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+
+    eng = Engine()
+    wf = Workflow(key="nested_rerun")
+
+    def n1(ctx: NodeContext):
+        (ctx.node_workdir / "out.txt").write_text("from-n1", encoding="utf-8")
+
+    def n2(ctx: NodeContext):
+        upstream = ctx.workspace / "n1" / "out.txt"
+        merged = upstream.read_text(encoding="utf-8") + "-n2"
+        (ctx.node_workdir / "s2.txt").write_text(merged, encoding="utf-8")
+
+    wf.add_node("n1", n1, workdir="n1", whitelist=["out.txt"])
+    wf.add_node("n2", n2, workdir="n2", whitelist=["s2.txt"])
+    eng.register_workflow(wf)
+
+    tasks_root = tmp_path / "runs"
+    app = create_app(eng, store, tasks_root, spawn_worker_fn=_sync_spawn(eng, store))
+    return {"app": app, "tasks_root": tasks_root}
+
+
+def test_rerun_restores_subdir_node_snapshots(nested_workdir_setup):
+    """Snapshots are rooted at node workdir; rerun unpacks under workspace/n1/ etc."""
+    app = nested_workdir_setup["app"]
+    tasks_root: Path = nested_workdir_setup["tasks_root"]
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.post("/tasks", json={"workflow_key": "nested_rerun", "input": {}})
+            assert r.status_code == 201
+            task_id = r.json()["task_id"]
+            ws = task_layout(tasks_root / task_id).workspace
+
+            d0 = await client.get(f"/tasks/{task_id}")
+            assert d0.json()["status"] == S.TASK_SUCCEEDED
+            assert (ws / "n1" / "out.txt").read_text(encoding="utf-8") == "from-n1"
+            assert (ws / "n2" / "s2.txt").read_text(encoding="utf-8") == "from-n1-n2"
+
+            _clear_workspace_for_test(ws)
+
+            rr = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "n2"})
+            assert rr.status_code == 202
+
+            done = await client.get(f"/tasks/{task_id}")
+            assert done.json()["status"] == S.TASK_SUCCEEDED
+            assert (ws / "n1" / "out.txt").read_text(encoding="utf-8") == "from-n1"
+            assert (ws / "n2" / "s2.txt").read_text(encoding="utf-8") == "from-n1-n2"
+
+    asyncio.run(_run())
+
+
 def test_rerun_missing_snapshot_returns_409(three_node_setup):
     app = three_node_setup["app"]
 
