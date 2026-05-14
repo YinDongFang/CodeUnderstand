@@ -84,13 +84,14 @@ main_type="$(bash "${CLASSIFY_SH}" "${code_dir}" "${github}" | tr -d '\r' | head
 pack_out "main_type: ${main_type}"
 
 jq -n \
+  --arg repo "${repo}" \
   --arg github "${github}" \
   --arg ml "${main_language}" \
   --arg mt "${main_type}" \
   --arg dl "${difficulty_level}" \
   '{
     basic_info: {
-      repo_name: $github,
+      repo_name: $repo,
       main_language: $ml,
       github: { url: $github, star: 0 }
     },
