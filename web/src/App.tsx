@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   createTask,
   fetchLogs,
@@ -14,34 +14,15 @@ import {
   type WorkflowInfo,
 } from './api'
 import { formatTaskDisplayTime, formatWallSeconds } from './utils/format'
-import { splitLogLinesIntoRuns, logRunTitle, groupLogLines } from './utils/log'
 import { defaultPayloadDraftFromSchema, parseInputSchema, buildInputFromForm } from './utils/schema'
-import { displayTaskName, hasDictContent, chipClass, stringifyCell, nodeTiming, sortedNodes, TASK_TERMINAL } from './utils/display'
+import { displayTaskName, hasDictContent, chipClass, TASK_TERMINAL } from './utils/display'
+import KvBlock from './components/KvBlock'
+import NodeStrip from './components/NodeStrip'
+import LogViewer from './components/LogViewer'
+import InterruptPanel from './components/InterruptPanel'
 import './App.css'
 
 const POLL_MS = 2000
-
-function KvBlock({ title, data }: { title: string; data: Record<string, unknown> }) {
-  return (
-    <>
-      <h3 className="section-heading">{title}</h3>
-      <table className="kv-table">
-        <tbody>
-          {Object.entries(data).map(([k, v]) => (
-            <tr key={k}>
-              <th scope="row" className="mono">
-                {k}
-              </th>
-              <td>
-                <pre className="kv-cell">{stringifyCell(v)}</pre>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  )
-}
 
 export default function App() {
   const [tasks, setTasks] = useState<TaskSummary[]>([])
@@ -365,8 +346,6 @@ export default function App() {
     }
   }
 
-  const logRuns = splitLogLinesIntoRuns(logLines)
-
   return (
     <>
       <div className="shell">
@@ -485,144 +464,27 @@ export default function App() {
                   <KvBlock title="Context" data={detail.context} />
                 )}
 
-                <h3 className="section-heading">Nodes</h3>
-                {nodeActionErr && <p className="err">{nodeActionErr}</p>}
-                <div
-                  className="node-strip"
-                  role="list"
-                  aria-label="Workflow nodes in execution order, left to right"
-                >
-                  {sortedNodes(detail.nodes).map((n, idx) => {
-                    const timing = nodeTiming(n, nowTick)
-                    const errMsg =
-                      n.error && typeof n.error.message === 'string'
-                        ? n.error.message
-                        : n.error
-                          ? JSON.stringify(n.error)
-                          : null
-                    return (
-                      <Fragment key={`${n.ordinal}-${n.node_id}`}>
-                        {idx > 0 && (
-                          <span className="node-sep" aria-hidden>
-                            ›
-                          </span>
-                        )}
-                        <div className="node-card" role="listitem" title={n.zip_path ?? undefined}>
-                          <div className="node-card-head">
-                            <span className="node-card-ord">#{n.ordinal + 1}</span>
-                            <span className="node-card-id">{n.node_id}</span>
-                          </div>
-                          <span className={chipClass(n.status)}>{n.status}</span>
-                          <div className="node-card-time">
-                            <div>{timing.summary}</div>
-                            {timing.detail && (
-                              <div className="node-card-time-sub">{timing.detail}</div>
-                            )}
-                            {errMsg && <div className="node-card-err">{errMsg}</div>}
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn-secondary node-rerun-btn"
-                            disabled={
-                              detail.status === 'waiting_human' ||
-                              rerunBusyNodeId === n.node_id
-                            }
-                            title={
-                              detail.status === 'waiting_human'
-                                ? 'Cannot rerun while waiting for human input'
-                                : 'Rerun from this node (POST /tasks/…/rerun)'
-                            }
-                            onClick={() => void onRerunFromNode(n.node_id)}
-                          >
-                            {rerunBusyNodeId === n.node_id ? 'Submitting…' : 'Rerun from here'}
-                          </button>
-                        </div>
-                      </Fragment>
-                    )
-                  })}
-                </div>
+                <NodeStrip
+                  nodes={detail.nodes}
+                  nowTick={nowTick}
+                  taskStatus={detail.status}
+                  rerunBusyNodeId={rerunBusyNodeId}
+                  nodeActionErr={nodeActionErr}
+                  onRerun={onRerunFromNode}
+                />
 
                 {detail.interrupt && (
-                  <section className="interrupt">
-                    <h3>Interrupt</h3>
-                    <pre className="json">{JSON.stringify(detail.interrupt, null, 2)}</pre>
-                    <label className="lbl" htmlFor="payload-json">
-                      Resolve payload (JSON object)
-                    </label>
-                    <textarea
-                      id="payload-json"
-                      className="textarea"
-                      rows={6}
-                      spellCheck={false}
-                      value={resolveDraft}
-                      onChange={(e) => setResolveDraft(e.target.value)}
-                    />
-                    {resolveErr && <p className="err">{resolveErr}</p>}
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={resolveBusy}
-                      onClick={() => void onResolve()}
-                    >
-                      {resolveBusy ? 'Posting…' : 'POST /interrupt/resolve'}
-                    </button>
-                    <p className="muted small">
-                      Body: <code className="mono">{`{ interrupt_seq, payload }`}</code>
-                    </p>
-                  </section>
+                  <InterruptPanel
+                    interrupt={detail.interrupt}
+                    resolveDraft={resolveDraft}
+                    resolveErr={resolveErr}
+                    resolveBusy={resolveBusy}
+                    onResolveDraftChange={setResolveDraft}
+                    onResolve={onResolve}
+                  />
                 )}
 
-                <h3 className="section-heading">Logs</h3>
-                {logsErr && <p className="err">{logsErr}</p>}
-                {!logLines.length && !logsErr && <pre className="logs logs-empty">—</pre>}
-                {logLines.length > 0 && (
-                  <div className="log-runs-stack" aria-label="Logs by worker run">
-                    {logRuns.map((runLines, ri) => {
-                      const nodeGroups = groupLogLines(runLines)
-                      const runTitle = logRunTitle(runLines, ri, logRuns.length)
-                      const isLatest = ri === logRuns.length - 1
-                      return (
-                        <div
-                          key={`run-${ri}-${runLines.length}-${runLines[0]?.slice(0, 48) ?? ''}`}
-                          className={
-                            isLatest ? 'log-run-card log-run-card-latest' : 'log-run-card'
-                          }
-                        >
-                          <details className="log-run" open={isLatest}>
-                            <summary className="log-run-summary">
-                              <span className="log-run-summary-left">
-                                <span className="log-run-badge">
-                                  Run {ri + 1}/{logRuns.length}
-                                </span>
-                                <span className="log-run-title">{runTitle}</span>
-                              </span>
-                              <span className="muted log-summary-meta">
-                                {runLines.length} lines
-                              </span>
-                            </summary>
-                            <div className="log-run-body">
-                              {nodeGroups.map((g, i) => (
-                                <details
-                                  key={`${ri}-${g.title}-${i}`}
-                                  className="log-block"
-                                  open={isLatest}
-                                >
-                                  <summary className="log-summary">
-                                    <span className="log-summary-label">{g.title}</span>
-                                    <span className="muted log-summary-meta">
-                                      {g.lines.length} lines
-                                    </span>
-                                  </summary>
-                                  <pre className="log-block-body">{g.lines.join('\n')}</pre>
-                                </details>
-                              ))}
-                            </div>
-                          </details>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                <LogViewer logLines={logLines} logsErr={logsErr} />
               </>
                 )}
               </>
