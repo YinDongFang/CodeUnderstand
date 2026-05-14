@@ -6,19 +6,44 @@
 
 ## 定义工作流
 
-在 `workflow/` 目录下创建任意 `.py` 文件（非 `_` 前缀），暴露 `register_all(engine)` 函数：
+在 `workflow/` 目录下创建任意 `.py` 文件（非 `_` 前缀），通过模块级声明暴露元数据：
 
 ```python
 # workflow/my_pipeline.py
-from wf_engine import Engine, Workflow, NodeContext
+from wf_engine import NodeContext
 
-def register_all(engine: Engine) -> None:
-    wf = Workflow(key="my_pipeline")
-    wf.add_node("step1", my_fn, workdir=".", whitelist=["out.txt"])
-    engine.register_workflow(wf)
+WORKFLOW_KEY = "my_pipeline"  # 可选，默认为文件名
+
+def get_input_schema() -> dict:  # 可选
+    return {"type": "object", "properties": {...}, "required": [...]}
+
+def step1(ctx: NodeContext) -> None:
+    (ctx.node_workdir / "out.txt").write_text("hello", encoding="utf-8")
+
+def get_nodes() -> list[dict]:
+    return [
+        {"id": "step1", "fn": step1, "workdir": ".", "whitelist": ["out.txt"]},
+    ]
 ```
 
-启动时 `Engine` 自动扫描 `workflow/` 目录，调用每个模块的 `register_all`。无需手动导入。
+启动时 `Engine` 自动扫描 `workflow/` 目录，读取每个模块的 `WORKFLOW_KEY` / `get_input_schema()` / `get_nodes()` 构造 `Workflow` 对象。无需调用任何 register API。
+
+模块约定：
+
+| 名称 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `WORKFLOW_KEY` | `str` | 否 | 工作流键，默认为文件名（不含 `.py`） |
+| `get_input_schema()` | `() -> dict \| None` | 否 | JSON Schema，描述 `input` 字段 |
+| `get_nodes()` | `() -> list[dict]` | **是** | 节点定义列表；缺失视为该模块不是工作流 |
+
+`get_nodes()` 返回的每个节点字典支持：
+
+| 键 | 类型 | 必填 | 默认 | 说明 |
+|----|------|------|------|------|
+| `id` | `str` | 是 | — | 节点 ID |
+| `fn` | `(NodeContext) -> None` | 是 | — | 节点函数 |
+| `workdir` | `str` | 否 | `"."` | workspace 下的相对路径，禁止 `..` |
+| `whitelist` | `list[str]` | 否 | `[]` | 产物 zip 的 glob 列表 |
 
 ## 启动控制面
 
@@ -46,7 +71,10 @@ engine.serve(
 节点首次运行可抛出受控中断以等待人工输入；解析后同一节点带着 `ctx.human_input` 再次执行：
 
 ```python
-from wf_engine import Engine, Workflow, NodeContext, interrupt
+# workflow/gated.py
+from wf_engine import NodeContext, interrupt
+
+WORKFLOW_KEY = "demo"
 
 def human_gate(ctx: NodeContext):
     if ctx.human_input is not None:
@@ -54,10 +82,8 @@ def human_gate(ctx: NodeContext):
         return
     interrupt(expected_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]})
 
-def register_all(engine: Engine):
-    wf = Workflow(key="demo")
-    wf.add_node("g", human_gate, workdir=".", whitelist=["out.txt"])
-    engine.register_workflow(wf)
+def get_nodes() -> list[dict]:
+    return [{"id": "g", "fn": human_gate, "workdir": ".", "whitelist": ["out.txt"]}]
 ```
 
 ## 本地开发：API + Web UI

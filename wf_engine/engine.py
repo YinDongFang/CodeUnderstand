@@ -13,6 +13,33 @@ log = logging.getLogger(__name__)
 _WORKFLOW_PACKAGE = "workflow"
 
 
+def _build_workflow_from_module(mod: ModuleType, *, default_key: str) -> Workflow | None:
+    """Construct a ``Workflow`` from a module's declarative attributes.
+
+    Reads ``WORKFLOW_KEY`` (optional, defaults to ``default_key``),
+    ``get_input_schema()`` (optional), and ``get_nodes()`` (required).
+    Returns ``None`` if ``get_nodes`` is missing — callers should treat that
+    as "module is not a workflow".
+    """
+    get_nodes = getattr(mod, "get_nodes", None)
+    if get_nodes is None:
+        return None
+    key = str(getattr(mod, "WORKFLOW_KEY", default_key))
+    input_schema = None
+    get_input_schema = getattr(mod, "get_input_schema", None)
+    if get_input_schema is not None:
+        input_schema = get_input_schema()
+    wf = Workflow(key=key, input_schema=input_schema)
+    for node in get_nodes():
+        wf.add_node(
+            node_id=node["id"],
+            fn=node["fn"],
+            workdir=node.get("workdir", "."),
+            whitelist=node.get("whitelist", ()),
+        )
+    return wf
+
+
 class Engine:
     def __init__(self) -> None:
         self._workflows: dict[str, Workflow] = {}
@@ -37,9 +64,20 @@ class Engine:
         ]
 
     def discover_workflows(self) -> int:
-        """Import every ``.py`` module under ``workflow/`` and call its
-        ``register_all(engine)`` (if present).  Returns the number of modules
-        that successfully registered at least one workflow."""
+        """Import every ``.py`` module under ``workflow/`` and build a
+        ``Workflow`` from its declarative metadata.
+
+        Each module may expose:
+
+        - ``WORKFLOW_KEY`` (optional, default = module stem)
+        - ``get_input_schema()`` → ``dict | None`` (optional)
+        - ``get_nodes()`` → ``list[dict]`` with keys
+          ``id``, ``fn``, optional ``workdir`` (default ``"."``),
+          optional ``whitelist`` (default ``[]``)
+
+        Modules without ``get_nodes`` are skipped. Returns the number of
+        workflows registered.
+        """
         try:
             pkg: ModuleType = importlib.import_module(_WORKFLOW_PACKAGE)
         except ModuleNotFoundError:
@@ -52,24 +90,22 @@ class Engine:
         count_before = len(self._workflows)
         for root in pkg_paths:
             for py_file in sorted(root.glob("*.py")):
-                name = py_file.stem
-                if name.startswith("_"):
+                stem = py_file.stem
+                if stem.startswith("_"):
                     continue
-                mod_name = f"{_WORKFLOW_PACKAGE}.{name}"
+                mod_name = f"{_WORKFLOW_PACKAGE}.{stem}"
                 try:
                     mod = importlib.import_module(mod_name)
                 except Exception:
                     log.exception("failed to import %s", mod_name)
                     continue
-                register_all = getattr(mod, "register_all", None)
-                if register_all is None:
+                wf = _build_workflow_from_module(mod, default_key=stem)
+                if wf is None:
                     continue
                 try:
-                    register_all(self)
-                except Exception:
-                    log.exception(
-                        "register_all failed for %s", mod_name
-                    )
+                    self.register_workflow(wf)
+                except ValueError:
+                    log.exception("duplicate workflow_key from %s", mod_name)
         return len(self._workflows) - count_before
 
     def serve(
