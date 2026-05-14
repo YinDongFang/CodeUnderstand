@@ -6,6 +6,6 @@ from __future__ import annotations
 RUN_BEGIN_PREFIX = "WF_ENGINE_RUN_BEGIN"
 
 
-def format_run_begin(*, generation: int, pid: int, task_id: str) -> str:
+def format_run_begin(*, round: int, generation: int, pid: int, task_id: str) -> str:
     """Single-line message body (after the ``|``-separated logging prefix)."""
-    return f"{RUN_BEGIN_PREFIX} generation={generation} pid={pid} task_id={task_id}"
+    return f"{RUN_BEGIN_PREFIX} round={round} generation={generation} pid={pid} task_id={task_id}"

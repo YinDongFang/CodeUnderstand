@@ -143,7 +143,7 @@ class SqliteStore:
 
     @staticmethod
     def _defaults_console() -> dict[str, str]:
-        return {"tasks_root": "", "cookie": "", "authorization": ""}
+        return {"root": ".wf_engine/tasks", "cookie": "", "authorization": ""}
 
     def get_console_settings(self) -> dict[str, str]:
         out = self._defaults_console()
@@ -156,7 +156,7 @@ class SqliteStore:
                 try:
                     raw = _loads(row["value_json"])
                     if isinstance(raw, dict):
-                        out["tasks_root"] = str(raw.get("tasks_root") or "")
+                        out["root"] = str(raw.get("root") or "") or ".wf_engine/tasks"
                         out["cookie"] = str(raw.get("cookie") or "")
                         out["authorization"] = str(raw.get("authorization") or "")
                         return dict(out)
@@ -182,7 +182,7 @@ class SqliteStore:
                 try:
                     s = _loads(r_sys["value_json"])
                     if isinstance(s, dict):
-                        out["tasks_root"] = str(s.get("tasks_root") or "")
+                        out["root"] = str(s.get("tasks_root") or s.get("root") or "")
                 except json.JSONDecodeError:
                     pass
         return dict(out)
@@ -195,7 +195,7 @@ class SqliteStore:
         authorization: str,
     ) -> None:
         payload = _dumps(
-            {"tasks_root": tasks_root, "cookie": cookie, "authorization": authorization}
+            {"root": tasks_root, "cookie": cookie, "authorization": authorization}
         )
         with self.connect() as c:
             c.execute(
@@ -542,8 +542,7 @@ class SqliteStore:
                 interrupt_response_consumed=0, status=?, updated_at=?,
                 worker_generation=worker_generation+1,
                 interrupt_wall_seconds_accumulated=?,
-                waiting_human_since=NULL,
-                execution_count=execution_count+1
+                waiting_human_since=NULL
                 WHERE id=?""",
                 (_dumps(payload), S.TASK_RUNNING, now, acc, task_id),
             )

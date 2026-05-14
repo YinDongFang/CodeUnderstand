@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 class ConsoleSettingsBody(BaseModel):
-    tasks_root: str = ""
+    root: str = ""
     cookie: str = ""
     authorization: str = ""
 
@@ -30,6 +30,8 @@ def _normalize_tasks_root_for_storage(cp: ControlPlaneState, raw: str) -> str:
     if not stripped:
         return ""
     p = Path(stripped).expanduser()
+    if not p.is_absolute():
+        p = Path.home() / p
     try:
         resolved = p.resolve()
     except (OSError, ValueError) as e:
@@ -57,13 +59,10 @@ def _normalize_tasks_root_for_storage(cp: ControlPlaneState, raw: str) -> str:
 
 def _settings_response(cp: ControlPlaneState) -> dict[str, str]:
     stored = cp.store.get_console_settings()
-    eff = effective_tasks_root(cp)
     return {
-        "tasks_root": stored["tasks_root"],
+        "root": stored.get("root") or ".wf_engine/tasks",
         "cookie": stored["cookie"],
         "authorization": stored["authorization"],
-        "server_tasks_root_default": str(cp.tasks_root),
-        "tasks_root_effective": str(eff),
     }
 
 
@@ -75,7 +74,7 @@ def get_settings(request: Request) -> dict[str, str]:
 @router.put("/settings")
 def put_settings(request: Request, body: ConsoleSettingsBody) -> dict[str, str]:
     cp = _cp(request)
-    normalized = _normalize_tasks_root_for_storage(cp, body.tasks_root)
+    normalized = _normalize_tasks_root_for_storage(cp, body.root)
     cp.store.set_console_settings(
         tasks_root=normalized,
         cookie=body.cookie,

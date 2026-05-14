@@ -61,7 +61,7 @@ def run_once(
 
     base = store.get_console_settings()
     settings_snapshot = {
-        "tasks_root": base["tasks_root"],
+        "root": base["root"],
         "cookie": base["cookie"],
         "authorization": base["authorization"],
         "task_parent_dir": str(task_root.resolve().parent),
@@ -73,6 +73,7 @@ def run_once(
         logger_name="wf_engine.runner",
         level="INFO",
         message=format_run_begin(
+            round=int(task.get("execution_count") or 0),
             generation=int(task["worker_generation"]),
             pid=pid,
             task_id=task_id,

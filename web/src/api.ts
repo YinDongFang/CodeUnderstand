@@ -80,13 +80,11 @@ export type LogsResponse = {
   next_cursor: number
 }
 
-/** Flat GET/PUT /settings payload (persisted + derived server paths). */
+/** Flat GET/PUT /settings payload. */
 export type ConsoleSettings = {
-  tasks_root: string
+  root: string
   cookie: string
   authorization: string
-  server_tasks_root_default: string
-  tasks_root_effective: string
 }
 
 export function fetchTasks(): Promise<TaskSummary[]> {
@@ -115,7 +113,7 @@ export function fetchSettings(): Promise<ConsoleSettings> {
 }
 
 export function saveSettings(body: {
-  tasks_root: string
+  root: string
   cookie: string
   authorization: string
 }): Promise<ConsoleSettings> {
@@ -130,12 +128,11 @@ export function createTask(body: {
   workflow_key: string
   name: string
   input: Record<string, unknown>
-  context: Record<string, unknown>
 }): Promise<{ task_id: string }> {
   return fetch(`${BASE}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, context: {} }),
   }).then((r) => parseJson<{ task_id: string }>(r))
 }
 

@@ -586,24 +586,42 @@
   color: #e6edf3;
 }
 
-.ghost-btn {
+.btn {
   padding: 0.42rem 0.75rem;
   border-radius: 6px;
   border: 1px solid #30363d;
   background: transparent;
   color: #e6edf3;
   font-size: 0.88rem;
+  font-weight: 600;
   cursor: pointer;
+  line-height: 1.4;
 }
 
-.ghost-btn:hover {
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  border-color: #238636;
+  background: #238636;
+  color: #fff;
+}
+
+.btn-primary:not(:disabled):hover {
+  background: #2ea043;
+}
+
+.btn-secondary {
+  border-color: #30363d;
+  background: transparent;
+  color: #e6edf3;
+}
+
+.btn-secondary:not(:disabled):hover {
   border-color: #58a6ff;
   background: rgba(88, 166, 255, 0.08);
-}
-
-.btn-sm {
-  padding: 0.32rem 0.62rem;
-  font-size: 0.82rem;
 }
 
 .interrupt {
@@ -702,21 +720,3 @@
   accent-color: #58a6ff;
 }
 
-.primary {
-  padding: 0.45rem 0.85rem;
-  border-radius: 6px;
-  border: 1px solid #238636;
-  background: #238636;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.primary:not(:disabled):hover {
-  background: #2ea043;
-}

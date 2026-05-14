@@ -203,8 +203,8 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
 
     cp.store.init_task_nodes(tid, [n.id for n in wf.nodes])
     cp.store.set_task_status(tid, S.TASK_RUNNING)
-    _spawn_for_task(cp, task_id=tid, workflow_key=wf.key)
     cp.store.mark_first_run_scheduled(tid)
+    _spawn_for_task(cp, task_id=tid, workflow_key=wf.key)
     return CreateTaskResponse(task_id=tid)
 
 

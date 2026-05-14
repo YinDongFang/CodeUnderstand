@@ -12,7 +12,7 @@ from wf_engine.store.sqlite import SqliteStore
 from wf_engine.workflow import Workflow
 
 
-def test_run_once_appends_run_begin_with_generation(tmp_path: Path) -> None:
+def test_run_once_appends_run_begin_with_execution_round(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
@@ -34,13 +34,14 @@ def test_run_once_appends_run_begin_with_generation(tmp_path: Path) -> None:
     )
     tr = tmp_path / "runs" / tid
     store.init_task_nodes(tid, ["a"])
+    store.mark_first_run_scheduled(tid)
     store.set_task_status(tid, S.TASK_RUNNING)
 
     run_once(store=store, workflow=wf, task_id=tid, task_root=tr, worker_pid=99999)
 
     log_path = task_layout(tr).logs / "task.log"
     text = log_path.read_text(encoding="utf-8")
-    assert "WF_ENGINE_RUN_BEGIN generation=0 pid=99999" in text
+    assert "WF_ENGINE_RUN_BEGIN round=1 generation=0 pid=99999" in text
     assert tid in text
 
     store.reset_nodes_from_ordinal(tid, 0)
@@ -49,4 +50,4 @@ def test_run_once_appends_run_begin_with_generation(tmp_path: Path) -> None:
 
     text2 = log_path.read_text(encoding="utf-8")
     assert text2.count("WF_ENGINE_RUN_BEGIN") == 2
-    assert "WF_ENGINE_RUN_BEGIN generation=1 pid=99999" in text2
+    assert "WF_ENGINE_RUN_BEGIN round=2 generation=1 pid=99999" in text2

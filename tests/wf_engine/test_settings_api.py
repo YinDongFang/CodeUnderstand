@@ -44,9 +44,11 @@ def test_settings_get_default(settings_api_app):
             j = r.json()
             assert j["cookie"] == ""
             assert j["authorization"] == ""
-            assert j["tasks_root"] == ""
-            assert "server_tasks_root_default" in j
-            assert "tasks_root_effective" in j
+            assert j == {
+                "root": ".wf_engine/tasks",
+                "cookie": "",
+                "authorization": "",
+            }
 
     asyncio.run(_run())
 
@@ -60,7 +62,7 @@ def test_settings_put_roundtrip(settings_api_app):
             r = await client.put(
                 "/settings",
                 json={
-                    "tasks_root": "",
+                    "root": ".wf_engine/tasks",
                     "cookie": "sid=1",
                     "authorization": "Bearer z",
                 },
@@ -76,7 +78,7 @@ def test_settings_put_roundtrip(settings_api_app):
     asyncio.run(_run())
 
 
-def test_settings_put_tasks_root_creates_dir(tmp_path: Path):
+def test_settings_put_relative_root_creates_home_relative_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
@@ -89,7 +91,10 @@ def test_settings_put_tasks_root_creates_dir(tmp_path: Path):
     wf.add_node("s", n1)
     eng.register_workflow(wf)
     app = create_app(eng, store, tmp_path / "runs_default", registry_module=None)
-    custom = tmp_path / "nested" / "custom_tasks"
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    custom_relative = "nested/custom_tasks"
+    custom_abs = home / custom_relative
 
     async def _run() -> None:
         transport = ASGITransport(app=app)
@@ -97,15 +102,18 @@ def test_settings_put_tasks_root_creates_dir(tmp_path: Path):
             r = await client.put(
                 "/settings",
                 json={
-                    "tasks_root": str(custom),
+                    "root": custom_relative,
                     "cookie": "",
                     "authorization": "",
                 },
             )
             assert r.status_code == 200
             j = r.json()
-            assert Path(j["tasks_root"]).resolve() == custom.resolve()
-            assert j["tasks_root_effective"] == j["tasks_root"]
-            assert custom.is_dir()
+            assert j == {
+                "root": custom_relative,
+                "cookie": "",
+                "authorization": "",
+            }
+            assert custom_abs.is_dir()
 
     asyncio.run(_run())

@@ -196,7 +196,7 @@ def test_apply_resolve_accumulates_interrupt_wall_and_bumps_exec(tmp_path: Path)
     assert row["status"] == S.TASK_RUNNING
     assert row["waiting_human_since"] is None
     assert row["interrupt_wall_seconds_accumulated"] >= 1
-    assert row["execution_count"] == 2
+    assert row["execution_count"] == 1
 
 
 def test_console_settings_default_empty(tmp_path: Path) -> None:
@@ -204,7 +204,7 @@ def test_console_settings_default_empty(tmp_path: Path) -> None:
     store = SqliteStore(db)
     store.init_schema()
     assert store.get_console_settings() == {
-        "tasks_root": "",
+        "root": ".wf_engine/tasks",
         "cookie": "",
         "authorization": "",
     }
@@ -214,19 +214,15 @@ def test_console_settings_roundtrip(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     store = SqliteStore(db)
     store.init_schema()
-    store.set_console_settings(
-        tasks_root="/data/t",
-        cookie="a=b",
-        authorization="Bearer x",
-    )
+    store.set_console_settings(root="data/t", cookie="a=b", authorization="Bearer x")
     assert store.get_console_settings() == {
-        "tasks_root": "/data/t",
+        "root": "data/t",
         "cookie": "a=b",
         "authorization": "Bearer x",
     }
-    store.set_console_settings(tasks_root="", cookie="", authorization="")
+    store.set_console_settings(root="", cookie="", authorization="")
     assert store.get_console_settings() == {
-        "tasks_root": "",
+        "root": ".wf_engine/tasks",
         "cookie": "",
         "authorization": "",
     }
@@ -248,18 +244,18 @@ def test_console_settings_merges_legacy_split_rows(tmp_path: Path) -> None:
             (LEGACY_SYSTEM_KEY, json.dumps({"tasks_root": "/legacy"})),
         )
     assert store.get_console_settings() == {
-        "tasks_root": "/legacy",
+        "root": "/legacy",
         "cookie": "c",
         "authorization": "a",
     }
-    store.set_console_settings(tasks_root="/n", cookie="x", authorization="y")
+    store.set_console_settings(root="/n", cookie="x", authorization="y")
     with store.connect() as c:
         n_legacy = c.execute(
             "SELECT COUNT(*) FROM settings WHERE key IN (?, ?)",
             (LEGACY_OPS_KEY, LEGACY_SYSTEM_KEY),
         ).fetchone()[0]
     assert n_legacy == 0
-    assert store.get_console_settings()["tasks_root"] == "/n"
+    assert store.get_console_settings()["root"] == "/n"
 
 
 def test_console_settings_corrupt_primary_falls_back_to_legacy(tmp_path: Path) -> None:
@@ -276,9 +272,9 @@ def test_console_settings_corrupt_primary_falls_back_to_legacy(tmp_path: Path) -
         c.execute(
             "INSERT OR REPLACE INTO settings (key, value_json) VALUES (?, ?)",
             (LEGACY_OPS_KEY, json.dumps({"cookie": "ok", "authorization": ""})),
-        )
+    )
     assert store.get_console_settings()["cookie"] == "ok"
-    assert store.get_console_settings()["tasks_root"] == ""
+    assert store.get_console_settings()["root"] == ".wf_engine/tasks"
 
 
 def test_second_open_interrupt_flushes_pending_segment(tmp_path: Path) -> None:

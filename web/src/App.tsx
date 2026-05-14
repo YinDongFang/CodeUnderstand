@@ -61,8 +61,8 @@ function splitLogLinesIntoRuns(lines: string[]): string[][] {
 
 function logRunTitle(runLines: string[], runIndex: number, totalRuns: number): string {
   const first = runLines[0] ?? ''
-  const m = first.match(/WF_ENGINE_RUN_BEGIN generation=(\d+)/)
-  if (m) return `Run · worker_generation ${m[1]}`
+  const m = first.match(/WF_ENGINE_RUN_BEGIN round=(\d+)/)
+  if (m) return `Round ${m[1]}`
   if (totalRuns === 1) return 'Log'
   return runIndex === 0 ? 'Legacy log (no run marker)' : `Section ${runIndex + 1}`
 }
@@ -168,20 +168,6 @@ function buildInputFromForm(
     }
   }
   return o
-}
-
-function parseJsonObjectDraft(label: string, draft: string): Record<string, unknown> {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(draft)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Invalid JSON'
-    throw new Error(`${label} JSON 无效：${msg}`, { cause: e })
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${label} 必须是 JSON object`)
-  }
-  return parsed as Record<string, unknown>
 }
 
 function hasDictContent(o: Record<string, unknown> | null | undefined): boolean {
@@ -291,20 +277,15 @@ export default function App() {
   const [workflowOptions, setWorkflowOptions] = useState<WorkflowInfo[]>([])
   const [newTaskName, setNewTaskName] = useState('')
   const [newWorkflowKey, setNewWorkflowKey] = useState('')
-  const [inputMode, setInputMode] = useState<'form' | 'json'>('json')
   const [inputForm, setInputForm] = useState<Record<string, string>>({})
-  const [inputJsonDraft, setInputJsonDraft] = useState('{}')
-  const [contextJsonDraft, setContextJsonDraft] = useState('{}')
   const [createErr, setCreateErr] = useState<string | null>(null)
   const [createBusy, setCreateBusy] = useState(false)
   const [rerunBusyNodeId, setRerunBusyNodeId] = useState<string | null>(null)
   const [nodeActionErr, setNodeActionErr] = useState<string | null>(null)
 
-  const [opsCookieDraft, setOpsCookieDraft] = useState('')
-  const [opsAuthDraft, setOpsAuthDraft] = useState('')
+  const opsCookieRef = useRef('')
+  const opsAuthRef = useRef('')
   const [tasksRootDraft, setTasksRootDraft] = useState('')
-  const [serverTasksRootDefault, setServerTasksRootDefault] = useState('')
-  const [tasksRootEffective, setTasksRootEffective] = useState('')
   const [settingsLoadErr, setSettingsLoadErr] = useState<string | null>(null)
   const [settingsSaveErr, setSettingsSaveErr] = useState<string | null>(null)
   const [settingsBusy, setSettingsBusy] = useState(false)
@@ -407,11 +388,9 @@ export default function App() {
     fetchSettings()
       .then((s) => {
         if (cancelled) return
-        setTasksRootDraft(s.tasks_root)
-        setOpsCookieDraft(s.cookie)
-        setOpsAuthDraft(s.authorization)
-        setServerTasksRootDefault(s.server_tasks_root_default)
-        setTasksRootEffective(s.tasks_root_effective)
+        setTasksRootDraft(s.root)
+        opsCookieRef.current = s.cookie
+        opsAuthRef.current = s.authorization
       })
       .catch((e: Error) => {
         if (!cancelled) setSettingsLoadErr(e.message)
@@ -426,10 +405,8 @@ export default function App() {
 
   const applyInputDefaults = (wf: WorkflowInfo | null | undefined) => {
     const fields = parseInputSchema(wf?.input_schema ?? null)
-    setInputJsonDraft(defaultPayloadDraftFromSchema(wf?.input_schema ?? null))
     if (!fields) {
       setInputForm({})
-      setInputMode('json')
       return
     }
     const next: Record<string, string> = {}
@@ -437,7 +414,6 @@ export default function App() {
       next[f.key] = f.type === 'boolean' ? 'false' : ''
     }
     setInputForm(next)
-    setInputMode('form')
   }
 
   const onResolve = async () => {
@@ -501,15 +477,13 @@ export default function App() {
     setSettingsBusy(true)
     try {
       const s = await saveSettings({
-        tasks_root: tasksRootDraft,
-        cookie: opsCookieDraft,
-        authorization: opsAuthDraft,
+        root: tasksRootDraft,
+        cookie: opsCookieRef.current,
+        authorization: opsAuthRef.current,
       })
-      setTasksRootDraft(s.tasks_root)
-      setOpsCookieDraft(s.cookie)
-      setOpsAuthDraft(s.authorization)
-      setServerTasksRootDefault(s.server_tasks_root_default)
-      setTasksRootEffective(s.tasks_root_effective)
+      setTasksRootDraft(s.root)
+      opsCookieRef.current = s.cookie
+      opsAuthRef.current = s.authorization
     } catch (e) {
       setSettingsSaveErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -526,10 +500,7 @@ export default function App() {
     setWorkflowsLoading(true)
     setNewTaskName('')
     setNewWorkflowKey('')
-    setInputMode('json')
     setInputForm({})
-    setInputJsonDraft('{}')
-    setContextJsonDraft('{}')
     setModalOpen(true)
     fetchWorkflows()
       .then((wfs) => {
@@ -577,13 +548,11 @@ export default function App() {
     }
     setCreateErr(null)
     let input: Record<string, unknown>
-    let context: Record<string, unknown>
     try {
       input =
-        inputMode === 'form' && inputFields && inputFields.length > 0
+        inputFields && inputFields.length > 0
           ? buildInputFromForm(inputFields, inputForm)
-          : parseJsonObjectDraft('input', inputJsonDraft)
-      context = parseJsonObjectDraft('context', contextJsonDraft)
+          : {}
     } catch (e) {
       setCreateErr(e instanceof Error ? e.message : String(e))
       return
@@ -595,7 +564,6 @@ export default function App() {
         workflow_key: newWorkflowKey,
         name: nameTrim,
         input,
-        context,
       })
       const rows = await fetchTasks()
       setTasks(rows)
@@ -621,12 +589,12 @@ export default function App() {
               <div className="left-head-actions">
                 <button
                   type="button"
-                  className="ghost-btn btn-sm"
+                  className="btn btn-secondary"
                   onClick={openSettings}
                 >
                   系统设置
                 </button>
-                <button type="button" className="primary btn-sm" onClick={openCreateModal}>
+                <button type="button" className="btn btn-primary" onClick={openCreateModal}>
                   新建任务
                 </button>
               </div>
@@ -663,29 +631,11 @@ export default function App() {
             {rightPanelTab === 'settings' ? (
               <section className="settings-in-pane" aria-label="系统设置">
                 {settingsLoadErr && <p className="err">{settingsLoadErr}</p>}
-                <label className="lbl mono" htmlFor="ro-server-root">
-                  server_tasks_root_default
-                </label>
-                <input
-                  id="ro-server-root"
-                  readOnly
-                  className="input-text mono muted-field"
-                  value={serverTasksRootDefault}
-                />
-                <label className="lbl mono" htmlFor="ro-effective-root">
-                  tasks_root_effective
-                </label>
-                <input
-                  id="ro-effective-root"
-                  readOnly
-                  className="input-text mono muted-field"
-                  value={tasksRootEffective}
-                />
-                <label className="lbl mono" htmlFor="sys-tasks-root">
-                  tasks_root
+                <label className="lbl mono" htmlFor="sys-root">
+                  root
                 </label>
                 <textarea
-                  id="sys-tasks-root"
+                  id="sys-root"
                   className="textarea mono"
                   rows={2}
                   spellCheck={false}
@@ -694,36 +644,11 @@ export default function App() {
                   onChange={(e) => setTasksRootDraft(e.target.value)}
                   disabled={settingsBusy}
                 />
-                <label className="lbl mono" htmlFor="ops-cookie-settings">
-                  cookie
-                </label>
-                <textarea
-                  id="ops-cookie-settings"
-                  className="textarea mono"
-                  rows={5}
-                  spellCheck={false}
-                  value={opsCookieDraft}
-                  onChange={(e) => setOpsCookieDraft(e.target.value)}
-                  disabled={settingsBusy}
-                />
-                <label className="lbl mono" htmlFor="ops-auth-settings">
-                  authorization
-                </label>
-                <textarea
-                  id="ops-auth-settings"
-                  className="textarea mono"
-                  rows={5}
-                  spellCheck={false}
-                  autoComplete="off"
-                  value={opsAuthDraft}
-                  onChange={(e) => setOpsAuthDraft(e.target.value)}
-                  disabled={settingsBusy}
-                />
                 {settingsSaveErr && <p className="err">{settingsSaveErr}</p>}
                 <div className="settings-save-row">
                   <button
                     type="button"
-                    className="primary"
+                    className="btn btn-primary"
                     disabled={settingsBusy}
                     onClick={() => void onSaveConsoleSettings()}
                   >
@@ -809,7 +734,7 @@ export default function App() {
                           </div>
                           <button
                             type="button"
-                            className="ghost-btn node-rerun-btn"
+                            className="btn btn-secondary node-rerun-btn"
                             disabled={
                               detail.status === 'waiting_human' ||
                               rerunBusyNodeId === n.node_id
@@ -847,7 +772,7 @@ export default function App() {
                     {resolveErr && <p className="err">{resolveErr}</p>}
                     <button
                       type="button"
-                      className="primary"
+                      className="btn btn-primary"
                       disabled={resolveBusy}
                       onClick={() => void onResolve()}
                     >
@@ -923,7 +848,7 @@ export default function App() {
           <div className="modal">
             <header className="modal-header">
               <h3>新建任务</h3>
-              <button type="button" className="ghost-btn" onClick={() => setModalOpen(false)}>
+              <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>
                 关闭
               </button>
             </header>
@@ -966,99 +891,55 @@ export default function App() {
               </select>
               {inputFields && inputFields.length > 0 && (
                 <div className="modal-input-fields">
-                  <div className="mode-tabs" aria-label="input mode">
-                    <button
-                      type="button"
-                      className={inputMode === 'form' ? 'mode-tab active' : 'mode-tab'}
-                      onClick={() => setInputMode('form')}
-                    >
-                      表单
-                    </button>
-                    <button
-                      type="button"
-                      className={inputMode === 'json' ? 'mode-tab active' : 'mode-tab'}
-                      onClick={() => setInputMode('json')}
-                    >
-                      JSON
-                    </button>
-                  </div>
-                  {inputMode === 'form' && (
-                    <>
-                      <p className="lbl strong">工作流参数 (input)</p>
-                      {inputFields.map((f) => (
-                        <div key={f.key} className="field-row">
-                          <label className="lbl" htmlFor={`nt-in-${f.key}`}>
-                            {f.title}
-                            {f.required ? <span className="req-mark"> *</span> : null}
-                          </label>
-                          {f.type === 'boolean' ? (
-                            <label className="check-row">
-                              <input
-                                id={`nt-in-${f.key}`}
-                                type="checkbox"
-                                checked={inputForm[f.key] === 'true'}
-                                onChange={(e) =>
-                                  setInputForm((prev) => ({
-                                    ...prev,
-                                    [f.key]: e.target.checked ? 'true' : 'false',
-                                  }))
-                                }
-                              />
-                              <span className="muted small">是 / 否</span>
-                            </label>
-                          ) : (
-                            <input
-                              id={`nt-in-${f.key}`}
-                              type={
-                                f.type === 'number' || f.type === 'integer' ? 'number' : 'text'
-                              }
-                              className="input-text"
-                              value={inputForm[f.key] ?? ''}
-                              onChange={(e) =>
-                                setInputForm((prev) => ({ ...prev, [f.key]: e.target.value }))
-                              }
-                              autoComplete="off"
-                            />
-                          )}
-                        </div>
-                      ))}
-                    </>
-                  )}
+                  <p className="lbl strong">工作流参数 (input)</p>
+                  {inputFields.map((f) => (
+                    <div key={f.key} className="field-row">
+                      <label className="lbl" htmlFor={`nt-in-${f.key}`}>
+                        {f.title}
+                        {f.required ? <span className="req-mark"> *</span> : null}
+                      </label>
+                      {f.type === 'boolean' ? (
+                        <label className="check-row">
+                          <input
+                            id={`nt-in-${f.key}`}
+                            type="checkbox"
+                            checked={inputForm[f.key] === 'true'}
+                            onChange={(e) =>
+                              setInputForm((prev) => ({
+                                ...prev,
+                                [f.key]: e.target.checked ? 'true' : 'false',
+                              }))
+                            }
+                          />
+                          <span className="muted small">是 / 否</span>
+                        </label>
+                      ) : (
+                        <input
+                          id={`nt-in-${f.key}`}
+                          type={
+                            f.type === 'number' || f.type === 'integer' ? 'number' : 'text'
+                          }
+                          className="input-text"
+                          value={inputForm[f.key] ?? ''}
+                          onChange={(e) =>
+                            setInputForm((prev) => ({ ...prev, [f.key]: e.target.value }))
+                          }
+                          autoComplete="off"
+                        />
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
-              {(!inputFields || inputFields.length === 0 || inputMode === 'json') && (
-                <>
-                  <label className="lbl strong" htmlFor="nt-input-json">
-                    input JSON
-                  </label>
-                  <textarea
-                    id="nt-input-json"
-                    className="textarea json-draft"
-                    value={inputJsonDraft}
-                    onChange={(e) => setInputJsonDraft(e.target.value)}
-                    spellCheck={false}
-                  />
-                </>
-              )}
-              <label className="lbl strong" htmlFor="nt-context-json">
-                context JSON
-              </label>
-              <textarea
-                id="nt-context-json"
-                className="textarea json-draft"
-                value={contextJsonDraft}
-                onChange={(e) => setContextJsonDraft(e.target.value)}
-                spellCheck={false}
-              />
               {createErr && <p className="err">{createErr}</p>}
             </div>
             <footer className="modal-footer">
-              <button type="button" className="ghost-btn" onClick={() => setModalOpen(false)}>
+              <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>
                 取消
               </button>
               <button
                 type="button"
-                className="primary"
+                className="btn btn-primary"
                 disabled={createBusy || workflowsLoading}
                 onClick={() => void onSubmitNewTask()}
               >
