@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from wf_engine import status as S
+from wf_engine.lease_util import parse_utc_iso, pid_alive
 
 
 def _utc_iso() -> str:
@@ -185,12 +186,69 @@ class SqliteStore:
             c.execute(
                 """UPDATE tasks SET status=?, updated_at=?,
                    worker_generation=worker_generation+1,
+                   interrupt_seq=0,
                    interrupt_node_id=NULL, interrupt_expected_schema=NULL,
                    interrupt_request_extras=NULL, interrupt_checkpoint=NULL,
                    interrupt_response_payload=NULL, interrupt_response_consumed=0
                    WHERE id=?""",
                 (S.TASK_RUNNING, now, task_id),
             )
+
+    def reconcile_all_running_tasks(self) -> None:
+        with self.connect() as c:
+            rows = c.execute(
+                "SELECT id FROM tasks WHERE status=?",
+                (S.TASK_RUNNING,),
+            ).fetchall()
+        for r in rows:
+            self.reconcile_stale_worker_for_task(str(r["id"]))
+
+    def reconcile_stale_worker_for_task(self, task_id: str) -> None:
+        with self.connect() as c:
+            row = c.execute(
+                "SELECT * FROM tasks WHERE id=?",
+                (task_id,),
+            ).fetchone()
+        if row is None or row["status"] != S.TASK_RUNNING:
+            return
+        now = datetime.now(timezone.utc)
+        lease_dead = True
+        lu = row["lease_until"]
+        if lu:
+            try:
+                lease_dead = now > parse_utc_iso(str(lu))
+            except ValueError:
+                lease_dead = True
+        pid = row["worker_pid"]
+        pid_dead = pid is None or not pid_alive(int(pid))
+        if not lease_dead and not pid_dead:
+            return
+
+        fin = _utc_iso()
+        err = _dumps(
+            {
+                "category": "worker_lost",
+                "message": "lease expired or worker process no longer running",
+            }
+        )
+        with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            n = c.execute(
+                "SELECT ordinal FROM task_nodes WHERE task_id=? AND status=?",
+                (task_id, S.NODE_RUNNING),
+            ).fetchone()
+            if n is not None:
+                c.execute(
+                    """UPDATE task_nodes SET status=?, finished_at=?, error_json=?
+                    WHERE task_id=? AND ordinal=?""",
+                    (S.NODE_FAILED, fin, err, task_id, int(n["ordinal"])),
+                )
+            c.execute(
+                """UPDATE tasks SET status=?, worker_pid=NULL, lease_until=NULL, updated_at=?
+                WHERE id=? AND status=?""",
+                (S.TASK_FAILED_STALLED, fin, task_id, S.TASK_RUNNING),
+            )
+            c.execute("COMMIT")
 
     def list_nodes(self, task_id: str) -> list[dict[str, Any]]:
         with self.connect() as c:

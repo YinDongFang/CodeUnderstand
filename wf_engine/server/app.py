@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from wf_engine.engine import Engine
 from wf_engine.store.sqlite import SqliteStore
@@ -23,6 +24,22 @@ def create_app(
 ) -> FastAPI:
     """Build the FastAPI control plane application."""
     app = FastAPI()
+
+    @app.exception_handler(HTTPException)
+    async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        d = exc.detail
+        if isinstance(d, dict) and isinstance(d.get("error"), dict):
+            return JSONResponse(status_code=exc.status_code, content=d)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": "http_error",
+                    "message": str(d) if d is not None else "request failed",
+                }
+            },
+        )
+
     app.state.cp = ControlPlaneState(
         engine=engine,
         store=store,

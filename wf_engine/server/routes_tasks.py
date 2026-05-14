@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -10,6 +11,7 @@ from jsonschema.exceptions import ValidationError
 from pydantic import BaseModel, Field
 
 from wf_engine import status as S
+from wf_engine.lease_util import parse_utc_iso, pid_alive
 from wf_engine.paths import task_layout
 from wf_engine.server.state import ControlPlaneState
 from wf_engine.unzip_util import UnsafeArchiveError, extract_zip_safely
@@ -46,6 +48,21 @@ def _cp(request: Request) -> ControlPlaneState:
 
 def _err(code: str, message: str) -> dict[str, Any]:
     return {"error": {"code": code, "message": message}}
+
+
+def _worker_lease_active(row: dict[str, Any]) -> bool:
+    if row.get("status") != S.TASK_RUNNING:
+        return False
+    lu = row.get("lease_until")
+    lease_ok = False
+    if lu:
+        try:
+            lease_ok = datetime.now(timezone.utc) <= parse_utc_iso(str(lu))
+        except ValueError:
+            lease_ok = False
+    pid = row.get("worker_pid")
+    pid_ok = pid is not None and pid_alive(int(pid))
+    return lease_ok and pid_ok
 
 
 def _clear_workspace_contents(workspace: Path) -> None:
@@ -148,6 +165,7 @@ def create_task(request: Request, body: CreateTaskBody) -> CreateTaskResponse:
 @router.get("/tasks")
 def list_tasks(request: Request) -> list[dict[str, Any]]:
     cp = _cp(request)
+    cp.store.reconcile_all_running_tasks()
     rows = cp.store.list_tasks()
     return [
         {
@@ -163,6 +181,7 @@ def list_tasks(request: Request) -> list[dict[str, Any]]:
 @router.get("/tasks/{task_id}")
 def get_task(request: Request, task_id: str) -> dict[str, Any]:
     cp = _cp(request)
+    cp.store.reconcile_stale_worker_for_task(task_id)
     row = cp.store.get_task(task_id)
     if row is None:
         raise HTTPException(status_code=404, detail=_err("not_found", "task not found"))
@@ -177,6 +196,7 @@ def get_task_logs(
     cursor: Annotated[int, Query(ge=0)] = 0,
 ) -> LogsResponse:
     cp = _cp(request)
+    cp.store.reconcile_stale_worker_for_task(task_id)
     row = cp.store.get_task(task_id)
     if row is None:
         raise HTTPException(status_code=404, detail=_err("not_found", "task not found"))
@@ -195,6 +215,7 @@ def get_task_logs(
 @router.post("/tasks/{task_id}/interrupt/resolve", status_code=202)
 def resolve_interrupt(request: Request, task_id: str, body: ResolveInterruptBody) -> dict[str, str]:
     cp = _cp(request)
+    cp.store.reconcile_stale_worker_for_task(task_id)
     row = cp.store.get_task(task_id)
     if row is None:
         raise HTTPException(status_code=404, detail=_err("not_found", "task not found"))
@@ -234,6 +255,7 @@ def resolve_interrupt(request: Request, task_id: str, body: ResolveInterruptBody
 @router.post("/tasks/{task_id}/rerun", status_code=202)
 def rerun_task(request: Request, task_id: str, body: RerunBody) -> dict[str, str]:
     cp = _cp(request)
+    cp.store.reconcile_stale_worker_for_task(task_id)
     row = cp.store.get_task(task_id)
     if row is None:
         raise HTTPException(status_code=404, detail=_err("not_found", "task not found"))
@@ -243,6 +265,14 @@ def rerun_task(request: Request, task_id: str, body: RerunBody) -> dict[str, str
             detail=_err(
                 "invalid_task_status",
                 "cannot rerun while task is waiting for human input",
+            ),
+        )
+    if _worker_lease_active(row):
+        raise HTTPException(
+            status_code=409,
+            detail=_err(
+                "worker_busy",
+                "task has an active worker (lease valid and process alive)",
             ),
         )
 

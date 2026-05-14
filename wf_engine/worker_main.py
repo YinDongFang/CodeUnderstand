@@ -6,18 +6,12 @@ import importlib
 import os
 import sys
 import traceback
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from wf_engine.engine import Engine
+from wf_engine.lease_util import utc_iso_after
 from wf_engine.runner import run_once
 from wf_engine.store.sqlite import SqliteStore
-
-
-def _lease_until_iso(*, seconds: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
 
 
 def _load_registry(engine: Engine) -> None:
@@ -45,14 +39,16 @@ def main() -> int:
 
         store = SqliteStore(db_path)
         pid = os.getpid()
-        lease_until = _lease_until_iso(seconds=60)
-        store.acquire_lease(task_id, pid, lease_until)
+        lease_ttl = int(os.environ.get("WF_ENGINE_LEASE_TTL_SECONDS", "300"))
+        store.acquire_lease(task_id, pid, utc_iso_after(seconds=lease_ttl))
         try:
             run_once(
                 store=store,
                 workflow=workflow,
                 task_id=task_id,
                 task_root=task_root,
+                worker_pid=pid,
+                lease_ttl_seconds=lease_ttl,
             )
         finally:
             store.release_lease(task_id)

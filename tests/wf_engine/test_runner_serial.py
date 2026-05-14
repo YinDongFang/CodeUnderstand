@@ -48,3 +48,36 @@ def test_three_nodes_linear_success():
         assert store.get_task(tid)["status"] == S.TASK_SUCCEEDED
         for o in range(3):
             assert store.list_nodes(tid)[o]["status"] == S.NODE_SUCCESS
+
+
+def test_whitelist_miss_marks_validation_failure():
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "db.sqlite"
+        store = SqliteStore(db)
+        store.init_schema()
+        eng = Engine()
+        wf = Workflow(key="w2")
+
+        def n1(ctx):
+            (ctx.node_workdir / "wrong.txt").write_text("no", encoding="utf-8")
+
+        wf.add_node("a", n1, whitelist=["expected.txt"])
+        eng.register_workflow(wf)
+        tr = Path(td) / "tasks" / "t2"
+        tr.mkdir(parents=True)
+        layout = task_layout(tr)
+        layout.workspace.mkdir(parents=True)
+        layout.zips.mkdir(parents=True)
+        tid = store.create_task(
+            workflow_key="w2",
+            workflow_revision="1",
+            input_obj={},
+            tasks_root=str(Path(td) / "tasks"),
+        )
+        store.init_task_nodes(tid, ["a"])
+        store.set_task_status(tid, S.TASK_RUNNING)
+        run_once(store=store, workflow=wf, task_id=tid, task_root=tr)
+        assert store.get_task(tid)["status"] == S.TASK_FAILED
+        node = store.list_nodes(tid)[0]
+        assert node["status"] == S.NODE_FAILED
+        assert node["error_json"]["category"] == "validation"

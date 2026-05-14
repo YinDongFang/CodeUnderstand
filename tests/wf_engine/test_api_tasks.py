@@ -217,3 +217,18 @@ def test_interrupt_resolve_roundtrip(tmp_path: Path):
             assert done.json()["status"] == S.TASK_SUCCEEDED
 
     asyncio.run(_run())
+
+
+def test_get_task_404_returns_top_level_error(api_setup):
+    app = api_setup["app"]
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get("/tasks/does-not-exist-uuid")
+            assert r.status_code == 404
+            body = r.json()
+            assert "error" in body
+            assert body["error"]["code"] == "not_found"
+
+    asyncio.run(_run())

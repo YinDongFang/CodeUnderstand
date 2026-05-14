@@ -10,6 +10,11 @@ async function parseJson<T>(res: Response): Promise<T> {
     throw new Error(`Invalid JSON (${res.status}): ${text.slice(0, 200)}`)
   }
   if (!res.ok) {
+    if (typeof body === 'object' && body !== null && 'error' in body) {
+      const err = (body as { error: { code?: string; message?: string } }).error
+      const msg = err?.message ?? JSON.stringify(body)
+      throw new Error(`HTTP ${res.status}: ${msg}`)
+    }
     const msg =
       typeof body === 'object' && body !== null && 'detail' in body
         ? JSON.stringify((body as { detail: unknown }).detail)

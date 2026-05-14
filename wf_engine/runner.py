@@ -5,10 +5,12 @@ from pathlib import Path
 from wf_engine import status as S
 from wf_engine.context import NodeContext
 from wf_engine.interrupt import ControlledInterrupt
+from wf_engine.lease_util import utc_iso_after
 from wf_engine.paths import task_layout
+from wf_engine.sandbox import resolve_node_workdir
 from wf_engine.store.sqlite import SqliteStore, _utc_iso
 from wf_engine.workflow import Workflow
-from wf_engine.zip_util import pack_whitelist_zip
+from wf_engine.zip_util import WhitelistPackError, pack_whitelist_zip, warn_extraneous_workspace_files
 
 
 def run_once(
@@ -17,6 +19,8 @@ def run_once(
     workflow: Workflow,
     task_id: str,
     task_root: Path,
+    worker_pid: int | None = None,
+    lease_ttl_seconds: int = 300,
 ) -> None:
     task = store.get_task(task_id)
     if task is None:
@@ -62,7 +66,27 @@ def run_once(
         now = _utc_iso()
         store.update_node(task_id, ordinal, status=S.NODE_RUNNING, started_at=now)
 
-        node_workdir = layout.workspace / spec.workdir_relative
+        if worker_pid is not None:
+            store.acquire_lease(
+                task_id,
+                worker_pid,
+                utc_iso_after(seconds=lease_ttl_seconds),
+            )
+
+        try:
+            node_workdir = resolve_node_workdir(layout.workspace, spec.workdir_relative)
+        except ValueError as e:
+            store.update_node(
+                task_id,
+                ordinal,
+                status=S.NODE_FAILED,
+                finished_at=_utc_iso(),
+                error_json={"category": "validation", "message": str(e)},
+            )
+            store.set_task_status(task_id, S.TASK_FAILED)
+            store.release_lease(task_id)
+            return
+
         node_workdir.mkdir(parents=True, exist_ok=True)
 
         ctx = NodeContext(
@@ -109,7 +133,24 @@ def run_once(
         globs = tuple(spec.whitelist_globs)
         dest_zip = layout.zips / f"{ordinal}_{spec.id}.zip"
         if globs:
-            pack_whitelist_zip(parent=node_workdir, include_globs=globs, dest_zip=dest_zip)
+            try:
+                packed_paths = pack_whitelist_zip(
+                    parent=node_workdir, include_globs=globs, dest_zip=dest_zip
+                )
+            except WhitelistPackError as e:
+                store.update_node(
+                    task_id,
+                    ordinal,
+                    status=S.NODE_FAILED,
+                    finished_at=_utc_iso(),
+                    error_json={"category": "validation", "message": str(e)},
+                )
+                store.set_task_status(task_id, S.TASK_FAILED)
+                store.release_lease(task_id)
+                return
+            warn_extraneous_workspace_files(
+                node_workdir=node_workdir, packed_rel_paths=packed_paths
+            )
             zip_path_str = str(dest_zip)
         else:
             zip_path_str = None

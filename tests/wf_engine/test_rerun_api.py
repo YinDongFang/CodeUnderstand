@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from wf_engine import status as S
 from wf_engine.context import NodeContext
 from wf_engine.engine import Engine
 from wf_engine.interrupt import interrupt
+from wf_engine.lease_util import utc_iso_after
 from wf_engine.paths import task_layout
 from wf_engine.runner import run_once
 from wf_engine.server.app import create_app
@@ -119,7 +121,7 @@ def test_rerun_missing_snapshot_returns_409(three_node_setup):
 
             resp = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
             assert resp.status_code == 409
-            assert resp.json()["detail"]["error"]["code"] == "missing_snapshot"
+            assert resp.json()["error"]["code"] == "missing_snapshot"
 
     asyncio.run(_run())
 
@@ -152,6 +154,84 @@ def test_rerun_rejected_when_waiting_human(tmp_path: Path):
             assert d.json()["status"] == S.TASK_WAITING_HUMAN
             resp = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
             assert resp.status_code == 409
-            assert resp.json()["detail"]["error"]["code"] == "invalid_task_status"
+            assert resp.json()["error"]["code"] == "invalid_task_status"
+
+    asyncio.run(_run())
+
+
+def test_rerun_rejected_when_worker_lease_active(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    eng = Engine()
+    wf = Workflow(key="busy_wf")
+
+    def n1(ctx: NodeContext):
+        (ctx.node_workdir / "keep.txt").write_text("x", encoding="utf-8")
+
+    wf.add_node("a", n1, whitelist=["keep.txt"])
+    eng.register_workflow(wf)
+
+    tid = store.create_task(
+        workflow_key="busy_wf",
+        workflow_revision="1",
+        input_obj={},
+        tasks_root=str(tmp_path / "runs"),
+    )
+    store.init_task_nodes(tid, ["a"])
+    store.set_task_status(tid, S.TASK_RUNNING)
+    store.acquire_lease(tid, os.getpid(), utc_iso_after(seconds=3600))
+
+    tasks_root = tmp_path / "runs"
+    app = create_app(eng, store, tasks_root, spawn_worker_fn=_sync_spawn(eng, store))
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/tasks/{tid}/rerun", json={"from_node_id": "a"})
+            assert resp.status_code == 409
+            assert resp.json()["error"]["code"] == "worker_busy"
+
+    asyncio.run(_run())
+
+
+def test_rerun_after_node_failure_completes(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    store = SqliteStore(db)
+    store.init_schema()
+    eng = Engine()
+    wf = Workflow(key="fail_once")
+
+    calls = {"n2": 0}
+
+    def n1(ctx: NodeContext):
+        (ctx.node_workdir / "s1.txt").write_text("one", encoding="utf-8")
+
+    def n2(ctx: NodeContext):
+        calls["n2"] += 1
+        if calls["n2"] < 2:
+            raise RuntimeError("first run fails")
+        (ctx.node_workdir / "s2.txt").write_text("two", encoding="utf-8")
+
+    wf.add_node("a", n1, whitelist=["s1.txt"])
+    wf.add_node("b", n2, whitelist=["s2.txt"])
+    eng.register_workflow(wf)
+
+    tasks_root = tmp_path / "runs"
+    app = create_app(eng, store, tasks_root, spawn_worker_fn=_sync_spawn(eng, store))
+
+    async def _run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.post("/tasks", json={"workflow_key": "fail_once", "input": {}})
+            task_id = r.json()["task_id"]
+            d = await client.get(f"/tasks/{task_id}")
+            assert d.json()["status"] == S.TASK_FAILED
+
+            rr = await client.post(f"/tasks/{task_id}/rerun", json={"from_node_id": "b"})
+            assert rr.status_code == 202
+
+            done = await client.get(f"/tasks/{task_id}")
+            assert done.json()["status"] == S.TASK_SUCCEEDED
 
     asyncio.run(_run())
