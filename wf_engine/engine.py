@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from wf_engine.workflow import Workflow
 
 
@@ -15,3 +17,23 @@ class Engine:
 
     def get_workflow(self, key: str) -> Workflow:
         return self._workflows[key]
+
+    def serve(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8000,
+        *,
+        db_path: Path,
+        tasks_root: Path,
+        registry_module: str | None = None,
+    ) -> None:
+        """Run the HTTP control plane with a single Uvicorn worker."""
+        import uvicorn
+
+        from wf_engine.server.app import create_app
+        from wf_engine.store.sqlite import SqliteStore
+
+        store = SqliteStore(Path(db_path))
+        store.init_schema()
+        app = create_app(self, store, Path(tasks_root), registry_module)
+        uvicorn.run(app, host=host, port=port, workers=1)
