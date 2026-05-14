@@ -12,8 +12,6 @@ from wf_engine import status as S
 from wf_engine.utils.lease import parse_utc_iso, pid_alive, utc_iso
 
 CONSOLE_SETTINGS_KEY = "console_settings"
-LEGACY_OPS_KEY = "ops_globals"
-LEGACY_SYSTEM_KEY = "system_config"
 
 
 def _dumps(obj: Any) -> str:
@@ -94,47 +92,13 @@ class SqliteStore:
                 );
                 """
             )
-            self._migrate_tasks_table(c)
-
-    @staticmethod
-    def _migrate_tasks_table(c: sqlite3.Connection) -> None:
-        cols_before = [str(r[1]) for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
-        if "name" not in cols_before:
-            c.execute("ALTER TABLE tasks ADD COLUMN name TEXT")
-        if "context_json" not in cols_before:
+            # Unique index on name for non-null values.
             c.execute(
-                "ALTER TABLE tasks ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        added_exec = False
-        if "execution_count" not in cols_before:
-            c.execute(
-                "ALTER TABLE tasks ADD COLUMN execution_count INTEGER NOT NULL DEFAULT 0"
-            )
-            added_exec = True
-        if "interrupt_wall_seconds_accumulated" not in cols_before:
-            c.execute(
-                "ALTER TABLE tasks ADD COLUMN interrupt_wall_seconds_accumulated INTEGER NOT NULL DEFAULT 0"
-            )
-        if "waiting_human_since" not in cols_before:
-            c.execute("ALTER TABLE tasks ADD COLUMN waiting_human_since TEXT")
-        # One non-null name per task (multiple NULL names allowed).
-        c.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_name_unique
-            ON tasks(name)
-            WHERE name IS NOT NULL
-            """
-        )
-        if added_exec:
-            c.execute(
-                """UPDATE tasks SET execution_count = 1
-                   WHERE execution_count = 0 AND status != ?""",
-                (S.TASK_PENDING,),
-            )
-            c.execute(
-                """UPDATE tasks SET waiting_human_since = updated_at
-                   WHERE status = ? AND (waiting_human_since IS NULL OR waiting_human_since = '')""",
-                (S.TASK_WAITING_HUMAN,),
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_name_unique
+                ON tasks(name)
+                WHERE name IS NOT NULL
+                """
             )
 
     @staticmethod
@@ -158,29 +122,6 @@ class SqliteStore:
                         return dict(out)
                 except json.JSONDecodeError:
                     pass
-            r_ops = c.execute(
-                "SELECT value_json FROM settings WHERE key=?",
-                (LEGACY_OPS_KEY,),
-            ).fetchone()
-            if r_ops is not None:
-                try:
-                    o = _loads(r_ops["value_json"])
-                    if isinstance(o, dict):
-                        out["cookie"] = str(o.get("cookie") or "")
-                        out["authorization"] = str(o.get("authorization") or "")
-                except json.JSONDecodeError:
-                    pass
-            r_sys = c.execute(
-                "SELECT value_json FROM settings WHERE key=?",
-                (LEGACY_SYSTEM_KEY,),
-            ).fetchone()
-            if r_sys is not None:
-                try:
-                    s = _loads(r_sys["value_json"])
-                    if isinstance(s, dict):
-                        out["root"] = str(s.get("tasks_root") or s.get("root") or "")
-                except json.JSONDecodeError:
-                    pass
         return dict(out)
 
     def set_console_settings(
@@ -198,10 +139,6 @@ class SqliteStore:
                 """INSERT INTO settings (key, value_json) VALUES (?, ?)
                    ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json""",
                 (CONSOLE_SETTINGS_KEY, payload),
-            )
-            c.execute(
-                "DELETE FROM settings WHERE key IN (?, ?)",
-                (LEGACY_OPS_KEY, LEGACY_SYSTEM_KEY),
             )
 
     def create_task(
