@@ -12,6 +12,33 @@ import './App.css'
 
 const POLL_MS = 2000
 
+/** Seeds textarea from JSON Schema `required` + `properties` so POST does not send `{}`. */
+function defaultPayloadDraftFromSchema(
+  schema: Record<string, unknown> | null | undefined,
+): string {
+  if (!schema || typeof schema !== 'object') {
+    return '{}'
+  }
+  const req = schema.required
+  const props = schema.properties as Record<string, Record<string, unknown>> | undefined
+  if (!Array.isArray(req) || !props) {
+    return '{}'
+  }
+  const o: Record<string, unknown> = {}
+  for (const key of req) {
+    if (typeof key !== 'string') continue
+    const p = props[key]
+    const t = p && typeof p === 'object' ? (p as { type?: string }).type : undefined
+    if (t === 'string') o[key] = ''
+    else if (t === 'number') o[key] = 0
+    else if (t === 'boolean') o[key] = false
+    else if (t === 'array') o[key] = []
+    else if (t === 'object') o[key] = {}
+    else o[key] = null
+  }
+  return JSON.stringify(o, null, 2)
+}
+
 function chipClass(status: string): string {
   const s = status.toLowerCase()
   if (s.includes('success') || s === 'succeeded') return 'chip chip-ok'
@@ -172,7 +199,7 @@ export default function App() {
 
   useEffect(() => {
     if (detail?.interrupt) {
-      setResolveDraft('{}')
+      setResolveDraft(defaultPayloadDraftFromSchema(detail.interrupt.expected_schema))
       setResolveErr(null)
     }
   }, [detail?.interrupt?.seq, detail?.id])
@@ -196,7 +223,9 @@ export default function App() {
         interrupt_seq: detail.interrupt.seq,
         payload,
       })
-      setResolveDraft('{}')
+      setResolveDraft(
+        defaultPayloadDraftFromSchema(detail.interrupt.expected_schema),
+      )
     } catch (e) {
       setResolveErr(e instanceof Error ? e.message : String(e))
     } finally {
