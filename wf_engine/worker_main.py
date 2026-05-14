@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import sys
 import traceback
@@ -10,8 +11,23 @@ from pathlib import Path
 
 from wf_engine.engine import Engine
 from wf_engine.lease_util import utc_iso_after
+from wf_engine.paths import task_layout
 from wf_engine.runner import run_once
 from wf_engine.store.sqlite import SqliteStore
+
+
+def _configure_task_file_logging(task_root: Path) -> None:
+    """Append worker / node logs to ``<task_root>/logs/task.log`` (API tail target)."""
+    log_dir = task_layout(task_root).logs
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / "task.log"
+    fmt = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
 
 
 def _load_registry(engine: Engine) -> None:
@@ -39,6 +55,13 @@ def main() -> int:
 
         store = SqliteStore(db_path)
         pid = os.getpid()
+        _configure_task_file_logging(task_root)
+        logging.getLogger(__name__).info(
+            "worker start pid=%s task_id=%s workflow_key=%s",
+            pid,
+            task_id,
+            workflow_key,
+        )
         lease_ttl = int(os.environ.get("WF_ENGINE_LEASE_TTL_SECONDS", "300"))
         store.acquire_lease(task_id, pid, utc_iso_after(seconds=lease_ttl))
         try:
