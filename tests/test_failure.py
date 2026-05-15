@@ -67,6 +67,9 @@ async def test_pending_handle_await_does_not_hang_on_crash(state_path):
     # await 未运行节点的 handle 不应 hang —— driver 崩溃时把异常塞进未决 future
     with pytest.raises(ValueError, match="boom"):
         await asyncio.wait_for(h_later, timeout=1.0)
+    # 再 await wait_all，取走 driver task 的异常，避免 "Task exception was never retrieved"
+    with pytest.raises(ValueError, match="boom"):
+        await flow.wait_all()
 
 
 async def test_non_json_serializable_result_crashes(state_path):

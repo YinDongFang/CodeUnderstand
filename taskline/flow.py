@@ -108,6 +108,10 @@ class Flow:
             for n in self._nodes:
                 if n.future is not None and not n.future.done():
                     n.future.set_exception(e)
+                    # 立即标记已取，避免无人 await 的 future 在 GC 时
+                    # 打印 "Future exception was never retrieved"。
+                    # future 仍保持异常态，await handle 时照样抛出。
+                    n.future.exception()
             raise
 
     async def _run_node(self, node: Node) -> None:
@@ -146,6 +150,12 @@ class Flow:
         save_state(self._state_path, {"version": 1, "nodes": done})
 
     async def wait_all(self) -> None:
-        """等到 driver 把当前队列排空。"""
-        while self._driver is not None and not self._driver.done():
-            await self._driver
+        """等到 driver 把当前队列排空；driver 以异常结束时原样上抛。"""
+        driver = self._driver
+        while driver is not None:
+            await driver
+            # driver 正常结束；若 submit 期间创建了新 driver，继续等待。
+            next_driver = self._driver
+            if next_driver is driver or next_driver is None:
+                break
+            driver = next_driver
