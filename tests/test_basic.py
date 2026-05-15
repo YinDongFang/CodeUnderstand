@@ -41,3 +41,52 @@ def test_node_construction_defaults():
     assert n.result is None
     assert n.exception is None
     assert n.future is None  # 由 Flow.submit 在事件循环内赋值
+
+
+from dagflow import Flow
+
+
+async def test_single_node_runs_and_returns_result():
+    flow = Flow()
+
+    async def make_value():
+        return 42
+
+    h = flow.submit(make_value)
+    await flow.wait_all()
+    assert (await h) == 42
+    assert h.state is NodeState.DONE
+
+
+async def test_single_node_returning_none_is_valid():
+    flow = Flow()
+
+    async def returns_none():
+        return None
+
+    h = flow.submit(returns_none)
+    await flow.wait_all()
+    assert (await h) is None
+    assert h.state is NodeState.DONE
+
+
+async def test_await_handle_without_wait_all():
+    flow = Flow()
+
+    async def quick():
+        return "x"
+
+    h = flow.submit(quick)
+    assert (await h) == "x"
+
+
+async def test_await_handle_repeated():
+    flow = Flow()
+
+    async def once():
+        return "only"
+
+    h = flow.submit(once)
+    await flow.wait_all()
+    assert (await h) == "only"
+    assert (await h) == "only"

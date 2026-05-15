@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable
 
-from .node import Node, NodeState
+from .node import Node, NodeState, TERMINAL_STATES
 from .handle import NodeHandle
 
 
@@ -64,5 +64,45 @@ class Flow:
         return f"{name}#{seq}"
 
     def _try_schedule(self, node: Node) -> None:
-        # 桩：下一任务补充真正的调度逻辑
-        pass
+        # 父全 DONE → 起 task；否则 PENDING 等被唤醒
+        # （SKIPPED 分支在后续任务里补）
+        if all(p.state is NodeState.DONE for p in node.parents):
+            node.state = NodeState.READY
+            task = asyncio.create_task(self._run(node))
+            task.add_done_callback(self._on_task_done)
+            self._inflight.add(task)
+
+    async def _run(self, node: Node) -> None:
+        node.state = NodeState.RUNNING
+        try:
+            real_args = tuple(p.result for p in node.parent_args)
+            real_kwargs = {k: p.result for k, p in node.parent_kwargs.items()}
+            value = await node.fn(*real_args, **real_kwargs)
+            node.result = value
+            node.state = NodeState.DONE
+            node.future.set_result(value)
+        finally:
+            self._wake_children(node)
+
+    def _wake_children(self, parent: Node) -> None:
+        for n in self._nodes:
+            if n.state is NodeState.PENDING and parent in n.parents:
+                self._try_schedule(n)
+
+    def _on_task_done(self, task: asyncio.Task) -> None:
+        self._inflight.discard(task)
+
+    async def wait_all(self) -> None:
+        """等到所有已注册节点都进入终态后返回。
+
+        若在 wait_all 等待期间有新的 submit 进来，新节点也会被等到。
+        多次调用幂等：第二次若已全终态会立刻返回。
+        """
+        while any(n.state not in TERMINAL_STATES for n in self._nodes):
+            if self._inflight:
+                await asyncio.wait(
+                    self._inflight, return_when=asyncio.FIRST_COMPLETED
+                )
+                self._inflight = {t for t in self._inflight if not t.done()}
+            else:
+                await asyncio.sleep(0)
