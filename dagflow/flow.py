@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable
 
 from .node import Node, NodeState, TERMINAL_STATES
 from .handle import NodeHandle
+from .errors import NodeFailed, NodeSkipped
 
 
 class Flow:
@@ -64,9 +65,12 @@ class Flow:
         return f"{name}#{seq}"
 
     def _try_schedule(self, node: Node) -> None:
-        # 父全 DONE → 起 task；否则 PENDING 等被唤醒
-        # （SKIPPED 分支在后续任务里补）
-        if all(p.state is NodeState.DONE for p in node.parents):
+        if any(
+            p.state in (NodeState.FAILED, NodeState.SKIPPED, NodeState.CANCELLED)
+            for p in node.parents
+        ):
+            self._mark_skipped(node)
+        elif all(p.state is NodeState.DONE for p in node.parents):
             node.state = NodeState.READY
             task = asyncio.create_task(self._run(node))
             task.add_done_callback(self._on_task_done)
@@ -81,8 +85,40 @@ class Flow:
             node.result = value
             node.state = NodeState.DONE
             node.future.set_result(value)
+        except asyncio.CancelledError:
+            node.state = NodeState.CANCELLED
+            node.future.cancel()
+            raise
+        except BaseException as e:
+            node.exception = e
+            node.state = NodeState.FAILED
+            nf = NodeFailed(node.id)
+            nf.__cause__ = e
+            node.future.set_exception(nf)
         finally:
             self._wake_children(node)
+
+    def _mark_skipped(self, node: Node) -> None:
+        node.state = NodeState.SKIPPED
+        cause_node = next(
+            (
+                p
+                for p in node.parents
+                if p.state
+                in (NodeState.FAILED, NodeState.CANCELLED, NodeState.SKIPPED)
+            ),
+            None,
+        )
+        ns = NodeSkipped(node.id)
+        if cause_node is not None:
+            # 用"最近一个失败/跳过的父"的 future 异常作 __cause__；
+            # 若该父也是 SKIPPED，其异常自带 __cause__，链条自然延续到根因。
+            try:
+                cause_node.future.result()
+            except BaseException as e:
+                ns.__cause__ = e
+        node.future.set_exception(ns)
+        self._wake_children(node)
 
     def _wake_children(self, parent: Node) -> None:
         for n in self._nodes:
