@@ -1,6 +1,4 @@
 """失败传染：FAILED 节点的下游全部 SKIPPED；__cause__ 链能追根因。"""
-from functools import partial
-
 import pytest
 
 from dagflow import Flow, NodeFailed, NodeSkipped, NodeState

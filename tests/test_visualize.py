@@ -1,6 +1,4 @@
 """to_dot：输出 graphviz DOT 字符串，包含节点 id、状态颜色、所有边。"""
-from functools import partial
-
 import pytest
 
 from dagflow import Flow
