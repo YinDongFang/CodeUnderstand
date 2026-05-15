@@ -36,3 +36,51 @@ async def test_wait_all_waits_for_inflight_node():
     await flow.wait_all()
     assert h.state.name == "DONE"
     assert (await h) == "slow"
+
+
+async def test_wait_all_waits_for_nodes_added_concurrently():
+    flow = Flow()
+
+    async def slow():
+        await asyncio.sleep(0.05)
+        return "slow"
+
+    async def fast():
+        return "fast"
+
+    # 先放一个慢节点
+    h_slow = flow.submit(slow)
+
+    # 在 wait_all 期间从另一个 task 加节点
+    async def add_more_later():
+        await asyncio.sleep(0.02)  # 在 wait_all 启动后
+        return flow.submit(fast)
+
+    waiter_task = asyncio.create_task(flow.wait_all())
+    h_fast = await add_more_later()
+
+    # wait_all 应等到 fast 也完成
+    await waiter_task
+    assert h_slow.state.name == "DONE"
+    assert h_fast.state.name == "DONE"
+    assert (await h_fast) == "fast"
+
+
+async def test_wait_all_with_all_skipped_branches():
+    flow = Flow()
+
+    async def bad():
+        raise ValueError("x")
+
+    async def child(_):
+        return "unreachable"
+
+    h_bad = flow.submit(bad)
+    h_c1 = flow.submit(child, h_bad)
+    h_c2 = flow.submit(child, h_c1)
+
+    # 全 SKIPPED/FAILED 也是终态，wait_all 应正常返回
+    await asyncio.wait_for(flow.wait_all(), timeout=1.0)
+    assert h_bad.state.name == "FAILED"
+    assert h_c1.state.name == "SKIPPED"
+    assert h_c2.state.name == "SKIPPED"
