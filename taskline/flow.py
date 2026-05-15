@@ -97,5 +97,47 @@ class Flow:
         return f"{name}#{seq}"
 
     async def _drain(self) -> None:
-        # 桩：Task 6 补完真正的串行驱动逻辑
-        pass
+        while self._next_index < len(self._nodes):
+            node = self._nodes[self._next_index]
+            self._next_index += 1
+            await self._run_node(node)
+
+    async def _run_node(self, node: Node) -> None:
+        node.state = NodeState.RUNNING
+        resuming = bool(self._resume_data) and node.index == len(self._resume_data)
+
+        if self._before_hook is not None:
+            await self._before_hook(
+                HookContext(phase="before", node_id=node.id,
+                            index=node.index, resuming=resuming)
+            )
+
+        real_args = tuple(p.result for p in node.parent_args)
+        real_kwargs = {k: p.result for k, p in node.parent_kwargs.items()}
+        value = await node.fn(*real_args, **real_kwargs)
+
+        if self._after_hook is not None:
+            await self._after_hook(
+                HookContext(phase="after", node_id=node.id, index=node.index,
+                            resuming=resuming, result=value)
+            )
+
+        # before + fn + after 全成功 → 落地状态并 checkpoint。
+        # 置 DONE 与 set_result 之间无 await，避免状态/future 不一致窗口。
+        node.result = value
+        node.state = NodeState.DONE
+        self._persist()
+        node.future.set_result(value)
+
+    def _persist(self) -> None:
+        done = [
+            {"id": n.id, "result": n.result}
+            for n in self._nodes
+            if n.state is NodeState.DONE
+        ]
+        save_state(self._state_path, {"version": 1, "nodes": done})
+
+    async def wait_all(self) -> None:
+        """等到 driver 把当前队列排空。"""
+        while self._driver is not None and not self._driver.done():
+            await self._driver

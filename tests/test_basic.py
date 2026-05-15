@@ -112,3 +112,88 @@ async def test_handle_await_can_be_repeated():
     h = NodeHandle(n)
     assert (await h) == "once"
     assert (await h) == "once"
+
+
+from functools import partial
+
+from taskline import Flow
+
+
+async def test_single_node_runs_and_returns_result(state_path):
+    flow = Flow()
+
+    async def make():
+        return 42
+
+    h = flow.submit(make)
+    await flow.wait_all()
+    assert (await h) == 42
+    assert h.state is NodeState.DONE
+
+
+async def test_single_node_returning_none(state_path):
+    flow = Flow()
+
+    async def returns_none():
+        return None
+
+    h = flow.submit(returns_none)
+    await flow.wait_all()
+    assert (await h) is None
+    assert h.state is NodeState.DONE
+
+
+async def test_await_handle_without_wait_all(state_path):
+    flow = Flow()
+
+    async def quick():
+        return "x"
+
+    h = flow.submit(quick)
+    assert (await h) == "x"
+
+
+async def test_chain_passes_parent_result_positional(state_path):
+    flow = Flow()
+
+    async def head():
+        return 7
+
+    async def tail(x):
+        return x * 2
+
+    h1 = flow.submit(head)
+    h2 = flow.submit(tail, h1)
+    await flow.wait_all()
+    assert (await h2) == 14
+
+
+async def test_chain_passes_parent_result_kwarg(state_path):
+    flow = Flow()
+
+    async def head():
+        return 7
+
+    async def tail(value):
+        return value + 1
+
+    h1 = flow.submit(head)
+    h2 = flow.submit(tail, value=h1)
+    await flow.wait_all()
+    assert (await h2) == 8
+
+
+async def test_multi_parent(state_path):
+    flow = Flow()
+
+    async def src(n):
+        return n
+
+    async def add(a, b):
+        return a + b
+
+    h1 = flow.submit(partial(src, 3))
+    h2 = flow.submit(partial(src, 4))
+    h3 = flow.submit(add, h1, h2)
+    await flow.wait_all()
+    assert (await h3) == 7
