@@ -8,6 +8,16 @@ from .node import Node, NodeState, TERMINAL_STATES
 from .handle import NodeHandle
 from .errors import NodeFailed, NodeSkipped
 
+_DOT_COLOR = {
+    NodeState.DONE: "palegreen",
+    NodeState.FAILED: "lightcoral",
+    NodeState.SKIPPED: "lightgray",
+    NodeState.CANCELLED: "khaki",
+    NodeState.RUNNING: "lightblue",
+    NodeState.READY: "white",
+    NodeState.PENDING: "white",
+}
+
 
 class Flow:
     def __init__(self) -> None:
@@ -142,3 +152,16 @@ class Flow:
                 self._inflight = {t for t in self._inflight if not t.done()}
             else:
                 await asyncio.sleep(0)
+
+    def to_dot(self) -> str:
+        """返回当前图状态的 graphviz DOT 字符串。"""
+        lines = ["digraph flow {", '  node [shape=box, style=filled];']
+        for n in self._nodes:
+            label = f"{n.id}\\n{n.state.value}"
+            color = _DOT_COLOR[n.state]
+            lines.append(f'  "{n.id}" [label="{label}", fillcolor={color}];')
+        for n in self._nodes:
+            for p in n.parents:
+                lines.append(f'  "{p.id}" -> "{n.id}";')
+        lines.append("}")
+        return "\n".join(lines)
