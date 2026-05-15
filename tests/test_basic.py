@@ -90,3 +90,89 @@ async def test_await_handle_repeated():
     await flow.wait_all()
     assert (await h) == "only"
     assert (await h) == "only"
+
+
+async def test_chain_two_nodes_positional():
+    flow = Flow()
+
+    async def head():
+        return 7
+
+    async def tail(x):
+        return x * 2
+
+    h1 = flow.submit(head)
+    h2 = flow.submit(tail, h1)
+    await flow.wait_all()
+    assert (await h2) == 14
+
+
+async def test_chain_two_nodes_kwargs():
+    flow = Flow()
+
+    async def head():
+        return 7
+
+    async def tail(value):
+        return value + 1
+
+    h1 = flow.submit(head)
+    h2 = flow.submit(tail, value=h1)
+    await flow.wait_all()
+    assert (await h2) == 8
+
+
+async def test_diamond_dependency():
+    flow = Flow()
+
+    async def root():
+        return 10
+
+    async def left(x):
+        return x + 1
+
+    async def right(x):
+        return x + 2
+
+    async def join(a, b):
+        return a * b
+
+    h_root = flow.submit(root)
+    h_left = flow.submit(left, h_root)
+    h_right = flow.submit(right, h_root)
+    h_join = flow.submit(join, h_left, h_right)
+    await flow.wait_all()
+    assert (await h_join) == 11 * 12  # 132
+
+
+async def test_multi_parent_positional_varargs():
+    flow = Flow()
+    from functools import partial
+
+    async def src(n):
+        return n
+
+    async def collect(*vals):
+        return sum(vals)
+
+    parents = [flow.submit(partial(src, i)) for i in range(5)]
+    total = flow.submit(collect, *parents)
+    await flow.wait_all()
+    assert (await total) == 0 + 1 + 2 + 3 + 4
+
+
+async def test_same_handle_multiple_times_as_parent():
+    flow = Flow()
+
+    async def base():
+        return 3
+
+    async def double(a, b):
+        return a + b
+
+    h = flow.submit(base)
+    twice = flow.submit(double, h, h)
+    await flow.wait_all()
+    assert (await twice) == 6
+    # parents 是 frozenset，去重后只算一个父
+    assert len(twice._node.parents) == 1
