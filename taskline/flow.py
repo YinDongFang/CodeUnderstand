@@ -97,10 +97,18 @@ class Flow:
         return f"{name}#{seq}"
 
     async def _drain(self) -> None:
-        while self._next_index < len(self._nodes):
-            node = self._nodes[self._next_index]
-            self._next_index += 1
-            await self._run_node(node)
+        try:
+            while self._next_index < len(self._nodes):
+                node = self._nodes[self._next_index]
+                self._next_index += 1
+                await self._run_node(node)
+        except BaseException as e:
+            # 异常管道（非错误恢复）：把异常塞进所有未决 future，
+            # 使 await handle 醒来抛出而非永久 hang；然后原样上抛。
+            for n in self._nodes:
+                if n.future is not None and not n.future.done():
+                    n.future.set_exception(e)
+            raise
 
     async def _run_node(self, node: Node) -> None:
         node.state = NodeState.RUNNING
