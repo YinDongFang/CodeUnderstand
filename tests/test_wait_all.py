@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from dagflow import Flow
+from dagflow import Flow, NodeFailed, NodeSkipped
 
 
 async def test_wait_all_on_empty_flow_returns_immediately():
@@ -84,3 +84,10 @@ async def test_wait_all_with_all_skipped_branches():
     assert h_bad.state.name == "FAILED"
     assert h_c1.state.name == "SKIPPED"
     assert h_c2.state.name == "SKIPPED"
+    # 显式 await 每个失败/跳过的 handle，避免 asyncio "Future exception was never retrieved" 警告
+    with pytest.raises(NodeFailed):
+        await h_bad
+    with pytest.raises(NodeSkipped):
+        await h_c1
+    with pytest.raises(NodeSkipped):
+        await h_c2
