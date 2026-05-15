@@ -13,6 +13,12 @@ from .persistence import load_state, save_state
 
 HookFn = Callable[[HookContext], Awaitable[None]]
 
+_DOT_COLOR = {
+    NodeState.DONE: "palegreen",
+    NodeState.RUNNING: "lightblue",
+    NodeState.PENDING: "white",
+}
+
 
 class Flow:
     def __init__(
@@ -159,3 +165,16 @@ class Flow:
             if next_driver is driver or next_driver is None:
                 break
             driver = next_driver
+
+    def to_dot(self) -> str:
+        """返回当前图状态的 graphviz DOT 字符串。"""
+        lines = ["digraph flow {", '  node [shape=box, style=filled];']
+        for n in self._nodes:
+            label = f"{n.id}\\n{n.state.value}"
+            color = _DOT_COLOR[n.state]
+            lines.append(f'  "{n.id}" [label="{label}", fillcolor={color}];')
+        for n in self._nodes:
+            for p in (*n.parent_args, *n.parent_kwargs.values()):
+                lines.append(f'  "{p.id}" -> "{n.id}";')
+        lines.append("}")
+        return "\n".join(lines)
