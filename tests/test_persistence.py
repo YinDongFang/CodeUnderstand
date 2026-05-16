@@ -40,7 +40,7 @@ def test_load_returns_nodes_list_only(tmp_path):
 
 
 async def test_flow_persists_all_done_nodes(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def a():
         return {"v": 1}
@@ -63,7 +63,7 @@ async def test_flow_persists_all_done_nodes(state_path):
 async def test_flow_persists_incrementally(state_path):
     # 第二个节点运行时，文件里应已有第一个节点
     seen_during_b = []
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def a():
         return 1
@@ -93,14 +93,14 @@ async def test_completed_flow_file_kept_and_rerun_is_idempotent(state_path):
         return x + 1
 
     # 第一次跑完
-    flow1 = Flow()
+    flow1 = Flow(state_path)
     h1 = flow1.submit(a)
     flow1.submit(b, h1)
     await flow1.wait_all()
     assert calls == ["a", "b"]
 
     # 文件保留；第二次新 Flow 同序列 submit → 全部加载为 DONE，不重跑
-    flow2 = Flow()
+    flow2 = Flow(state_path)
     h1b = flow2.submit(a)
     h2b = flow2.submit(b, h1b)
     await flow2.wait_all()

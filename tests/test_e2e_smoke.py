@@ -40,7 +40,7 @@ async def test_e2e_crash_and_resume(state_path):
         return {"archived": r["summary"]}
 
     # ---- run 1：report 崩溃 ----
-    flow1 = Flow(before_hook=before)
+    flow1 = Flow(state_path, before_hook=before)
     a1 = flow1.submit(load_alpha)
     b1 = flow1.submit(load_beta)
     m1 = flow1.submit(merge, a1, b1)
@@ -61,7 +61,7 @@ async def test_e2e_crash_and_resume(state_path):
     calls.clear()
     resume_flags.clear()
 
-    flow2 = Flow(before_hook=before)
+    flow2 = Flow(state_path, before_hook=before)
     a2 = flow2.submit(load_alpha)
     b2 = flow2.submit(load_beta)
     m2 = flow2.submit(merge, a2, b2)

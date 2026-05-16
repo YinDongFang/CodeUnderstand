@@ -1,4 +1,4 @@
-"""环境变量与持久化对齐校验。"""
+"""构造参数与持久化对齐校验。"""
 import json
 
 import pytest
@@ -6,14 +6,14 @@ import pytest
 from taskline import Flow, StateMismatchError
 
 
-async def test_missing_env_var_raises(monkeypatch):
-    monkeypatch.delenv("TASKLINE_STATE_PATH", raising=False)
-    with pytest.raises(RuntimeError, match="TASKLINE_STATE_PATH"):
+async def test_missing_state_path_raises():
+    # state_path 是必传参数；不传 → Python 自带 TypeError
+    with pytest.raises(TypeError, match="state_path"):
         Flow()
 
 
 async def test_submit_rejects_positional_literal(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def fn(x):
         return x
@@ -23,7 +23,7 @@ async def test_submit_rejects_positional_literal(state_path):
 
 
 async def test_submit_rejects_kwarg_literal(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def fn(x):
         return x
@@ -38,7 +38,7 @@ async def test_id_mismatch_raises_state_mismatch_error(state_path):
         json.dumps({"version": 1, "nodes": [{"id": "other#0", "result": 1}]}),
         encoding="utf-8",
     )
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def fetch():
         return 2
@@ -48,7 +48,7 @@ async def test_id_mismatch_raises_state_mismatch_error(state_path):
 
 
 async def test_nodes_property_returns_handles(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def fn():
         return 1

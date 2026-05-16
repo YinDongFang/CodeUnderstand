@@ -5,7 +5,7 @@ from taskline import Flow
 
 
 async def test_to_dot_contains_nodes_and_edges(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def a():
         return 1
@@ -26,7 +26,7 @@ async def test_to_dot_contains_nodes_and_edges(state_path):
 
 
 async def test_to_dot_colors_done_nodes(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def a():
         return 1
@@ -38,7 +38,7 @@ async def test_to_dot_colors_done_nodes(state_path):
 
 
 async def test_to_dot_on_empty_flow(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
     dot = flow.to_dot()
     assert dot.startswith("digraph flow {")
     assert "->" not in dot

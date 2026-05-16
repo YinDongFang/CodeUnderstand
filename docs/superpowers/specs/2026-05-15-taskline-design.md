@@ -49,7 +49,7 @@
 | 失败处理 | 节点抛异常 → 不 catch，异常上抛、进程崩溃 |
 | 失败后 submit | 不涉及（进程已崩溃）|
 | 取消 | 完全去掉 |
-| 持久化 | 运行状态写 JSON 文件；路径由环境变量 `TASKLINE_STATE_PATH` 配置；**必需** |
+| 持久化 | 运行状态写 JSON 文件；路径通过 `Flow(state_path, ...)` **构造参数**传入；**必需** |
 | 结果序列化 | 节点返回值**必须 JSON 可序列化** |
 | 恢复 | 重启加载 JSON，跳过已完成节点，从中断节点恢复 |
 | 成功后 | 持久化文件保留；下次启动全部节点已 DONE → 整个 flow 跳过（幂等）|
@@ -197,10 +197,11 @@ class StateMismatchError(RuntimeError):
 
 ## 5. 持久化与恢复
 
-### 5.1 环境变量
+### 5.1 路径来源
 
-- `TASKLINE_STATE_PATH` —— 持久化 JSON 文件路径。
-- **必需**：`Flow()` 构造时若该环境变量未设置 → 抛 `RuntimeError`（明确提示需要设置）。
+- 持久化 JSON 文件路径通过 `Flow(state_path, ...)` 构造参数传入。
+- **必需**：`state_path` 是位置-或-关键字第一参数，不传 → Python 自带 `TypeError: missing 1 required positional argument: 'state_path'`。
+- 类型：实现签名标注为 `str`，但运行时也接受 `pathlib.Path`（构造时 `str(state_path)` 归一化）。
 
 ### 5.2 文件格式
 
@@ -219,8 +220,8 @@ class StateMismatchError(RuntimeError):
 ### 5.3 加载
 
 `Flow.__init__` 时：
-- 读 `TASKLINE_STATE_PATH`。文件不存在 → `_resume_data = []`（全新运行）。
-- 文件存在 → 解析 JSON，`_resume_data = data["nodes"]`。
+- 把传入的 `state_path` 归一化为 `str` 存到 `self._state_path`。
+- 调 `load_state(self._state_path)`：文件不存在 → `_resume_data = []`（全新运行）；文件存在 → 解析 JSON，`_resume_data = data["nodes"]`。
 - `_next_index`（driver 起点）初始化为 `len(_resume_data)`。
 
 ### 5.4 节点对齐与 id 校验
@@ -255,8 +256,14 @@ class StateMismatchError(RuntimeError):
 
 ```python
 class Flow:
-    def __init__(self, *, before_hook=None, after_hook=None) -> None:
-        self._state_path = _require_env("TASKLINE_STATE_PATH")   # 缺失则 RuntimeError
+    def __init__(
+        self,
+        state_path: str,                 # 位置-或-关键字，必传；接受 str 或 Path
+        *,
+        before_hook: HookFn | None = None,
+        after_hook: HookFn | None = None,
+    ) -> None:
+        self._state_path = str(state_path)            # 归一化（接受 pathlib.Path）
         self._before_hook = before_hook
         self._after_hook = after_hook
         self._nodes: list[Node] = []
@@ -431,7 +438,8 @@ __all__ = ["Flow", "NodeHandle", "NodeState", "HookContext", "StateMismatchError
 
 ```python
 class Flow:
-    def __init__(self, *, before_hook: HookFn | None = None,
+    def __init__(self, state_path: str, *,
+                 before_hook: HookFn | None = None,
                  after_hook: HookFn | None = None) -> None: ...
     def submit(self, fn: Callable[..., Awaitable[T]], /,
                *parents: NodeHandle, **named_parents: NodeHandle) -> NodeHandle[T]: ...
@@ -447,17 +455,14 @@ class Flow:
 
 **(1) 基本流水线**
 ```python
-import os
 from functools import partial
 from taskline import Flow
-
-# TASKLINE_STATE_PATH 须已在环境中设置
 
 async def fetch(url): ...
 async def parse(raw): ...
 async def save(parsed): ...
 
-flow = Flow()
+flow = Flow("/path/to/state.json")
 h1 = flow.submit(partial(fetch, "https://example.com"))
 h2 = flow.submit(parse, h1)
 h3 = flow.submit(save, h2)
@@ -474,7 +479,7 @@ async def before(ctx):
 async def after(ctx):
     log.info("node %s done -> %r", ctx.node_id, ctx.result)
 
-flow = Flow(before_hook=before, after_hook=after)
+flow = Flow("/path/to/state.json", before_hook=before, after_hook=after)
 ...
 await flow.wait_all()
 ```
@@ -483,8 +488,8 @@ await flow.wait_all()
 ```python
 # 第一次运行：节点 2 抛异常 → wait_all 抛出 → 进程崩溃
 # 此时 JSON 文件已存节点 0、1 的结果
-# 用户修复问题后重新启动同一程序：
-flow = Flow()
+# 用户修复问题后重新启动同一程序，传入同一 state_path：
+flow = Flow("/path/to/state.json")
 h0 = flow.submit(step0)   # 加载为 DONE（不重跑）
 h1 = flow.submit(step1)   # 加载为 DONE（不重跑）
 h2 = flow.submit(step2)   # 恢复点：重新运行，before-hook resuming=True
@@ -496,7 +501,7 @@ await flow.wait_all()
 
 | 操作 | 行为 |
 | --- | --- |
-| `Flow()` 时 `TASKLINE_STATE_PATH` 未设置 | 抛 `RuntimeError` |
+| `Flow()` 不传 `state_path` | 抛 `TypeError`（Python 自带 "missing 1 required positional argument"）|
 | 持久化文件不存在 | 全新运行，`_resume_data = []` |
 | 持久化 id 与 submit 序列不匹配 | 抛 `StateMismatchError` |
 | `submit` 传非 NodeHandle 参数 | 抛 `TypeError` |
@@ -546,7 +551,7 @@ def to_dot(self) -> str:
 
 ## 10. 测试策略
 
-`pytest` + `pytest-asyncio`（`asyncio_mode = "auto"`）。所有测试用 `tmp_path` + `monkeypatch.setenv` 控制 `TASKLINE_STATE_PATH`，确保互不干扰。
+`pytest` + `pytest-asyncio`（`asyncio_mode = "auto"`）。所有测试通过共享 `state_path` fixture（`tmp_path / "state.json"`）拿一个隔离的临时路径，显式传入 `Flow(state_path, ...)`，确保互不干扰。
 
 | 文件 | 测试要点 |
 | --- | --- |
@@ -556,7 +561,7 @@ def to_dot(self) -> str:
 | `test_resume.py` | run1：节点 2 抛异常 → `wait_all` 抛出，文件存了节点 0/1。run2：新 `Flow()` 同序列 submit（节点 2 换成不报错版）→ 节点 0/1 不重跑（fn 用计数器验证未被调用）、节点 2 是恢复点、节点 2/3 正常完成 / 持久化文件覆盖全部节点时整个 flow 跳过 |
 | `test_hooks.py` | before/after 被调用、`HookContext` 各字段正确 / 加载为 DONE 的节点不触发 hook / hook 抛异常会上抛 / `resuming` 仅恢复点为 True |
 | `test_failure.py` | 节点抛异常 → 异常穿过 `wait_all` 重新抛出（原始异常类型，未被包装）/ 崩溃前已完成节点已持久化 / 未决 handle 的 `await` 也拿到异常不 hang |
-| `test_env.py` | `TASKLINE_STATE_PATH` 未设置 → `Flow()` 抛 `RuntimeError` / 持久化 id 与 submit 序列不匹配 → `StateMismatchError` / `submit` 传字面量 → `TypeError` |
+| `test_env.py` | `Flow()` 不传 `state_path` → `TypeError` / 持久化 id 与 submit 序列不匹配 → `StateMismatchError` / `submit` 传字面量 → `TypeError` |
 | `test_visualize.py` | `to_dot` 含全部节点 id 与边、3 态着色出现；空 flow 无边 |
 | `test_e2e_smoke.py` | 完整场景 A：第一次跑（节点 2 故意抛异常）→ 捕获异常、检查文件存了前缀；第二次新 Flow 同序列（节点 2 改为成功版）→ 从节点 2 恢复、全部 DONE、最终结果正确、节点 0/1 未重跑 |
 
@@ -564,7 +569,7 @@ def to_dot(self) -> str:
 
 进程内无法真崩溃，用两段模拟：
 - **run1**：构造 Flow，submit 一串节点，其中某节点 fn 抛异常；`with pytest.raises(...): await flow.wait_all()`。此后 JSON 文件含已完成前缀。
-- **run2**：同一测试函数内，新建 `Flow()`（同一 `TASKLINE_STATE_PATH` → 读到 run1 的文件），按相同顺序 submit（抛异常的节点换成成功版本或保持——取决于测试目的）；`await flow.wait_all()`；断言已完成节点未被重新调用（每个 fn 内对共享 dict 计数）、恢复点节点 `resuming=True`。
+- **run2**：同一测试函数内，新建 `Flow(state_path, ...)`（同一路径 → 读到 run1 的文件），按相同顺序 submit（抛异常的节点换成成功版本或保持——取决于测试目的）；`await flow.wait_all()`；断言已完成节点未被重新调用（每个 fn 内对共享 dict 计数）、恢复点节点 `resuming=True`。
 
 ### 10.2 不写测试的事
 
@@ -579,5 +584,5 @@ def to_dot(self) -> str:
 - **开发**：Windows，`python`（= python3），已配 pip 镜像源。`pip install -e ".[test]"`。
 - **生产**：Ubuntu + python3。
 - **打包**：`pyproject.toml`，`name = "taskline"`，`requires-python = ">=3.10"`。
-- 运行任何用到 Flow 的代码（含测试）前必须设置 `TASKLINE_STATE_PATH` 环境变量。
+- 构造 `Flow` 必须显式传入 `state_path`（JSON 检查点路径）。
 - 不引入额外依赖；JSON 用标准库 `json`，原子写用 `os.replace`。

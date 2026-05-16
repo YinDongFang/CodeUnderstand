@@ -23,7 +23,7 @@ async def test_resume_skips_done_nodes_and_reruns_from_crash(state_path):
         return prev + 100
 
     # run 1：step2 崩溃
-    flow1 = Flow()
+    flow1 = Flow(state_path)
     h0 = flow1.submit(step0)
     h1 = flow1.submit(step1, h0)
     flow1.submit(step2, h1)
@@ -35,7 +35,7 @@ async def test_resume_skips_done_nodes_and_reruns_from_crash(state_path):
     fail["on"] = False
     calls.clear()
 
-    flow2 = Flow()
+    flow2 = Flow(state_path)
     h0b = flow2.submit(step0)
     h1b = flow2.submit(step1, h0b)
     h2b = flow2.submit(step2, h1b)
@@ -66,7 +66,7 @@ async def test_resuming_flag_only_true_for_resume_point(state_path):
         return x + 1
 
     # run 1：节点 b 崩溃
-    flow1 = Flow(before_hook=before)
+    flow1 = Flow(state_path, before_hook=before)
     h_a = flow1.submit(a)
     h_b = flow1.submit(b, h_a)
     flow1.submit(c, h_b)
@@ -79,7 +79,7 @@ async def test_resuming_flag_only_true_for_resume_point(state_path):
     fail["on"] = False
     before_seen.clear()
 
-    flow2 = Flow(before_hook=before)
+    flow2 = Flow(state_path, before_hook=before)
     h_a2 = flow2.submit(a)
     h_b2 = flow2.submit(b, h_a2)
     flow2.submit(c, h_b2)
@@ -103,7 +103,7 @@ async def test_loaded_nodes_do_not_fire_hooks(state_path):
             raise RuntimeError("crash")
         return x + 1
 
-    flow1 = Flow(after_hook=after)
+    flow1 = Flow(state_path, after_hook=after)
     h_a = flow1.submit(a)
     flow1.submit(b, h_a)
     with pytest.raises(RuntimeError):
@@ -112,7 +112,7 @@ async def test_loaded_nodes_do_not_fire_hooks(state_path):
 
     fail["on"] = False
     after_ids.clear()
-    flow2 = Flow(after_hook=after)
+    flow2 = Flow(state_path, after_hook=after)
     h_a2 = flow2.submit(a)
     flow2.submit(b, h_a2)
     await flow2.wait_all()

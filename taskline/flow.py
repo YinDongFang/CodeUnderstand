@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any, Awaitable, Callable
 
 from .node import Node, NodeState
@@ -23,16 +22,12 @@ _DOT_COLOR = {
 class Flow:
     def __init__(
         self,
+        state_path: str,
         *,
         before_hook: HookFn | None = None,
         after_hook: HookFn | None = None,
     ) -> None:
-        try:
-            self._state_path = os.environ["TASKLINE_STATE_PATH"]
-        except KeyError:
-            raise RuntimeError(
-                "TASKLINE_STATE_PATH environment variable is required but not set."
-            ) from None
+        self._state_path = str(state_path)   # 也接受 pathlib.Path
         self._before_hook = before_hook
         self._after_hook = after_hook
         self._nodes: list[Node] = []

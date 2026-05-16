@@ -120,7 +120,7 @@ from taskline import Flow
 
 
 async def test_single_node_runs_and_returns_result(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def make():
         return 42
@@ -132,7 +132,7 @@ async def test_single_node_runs_and_returns_result(state_path):
 
 
 async def test_single_node_returning_none(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def returns_none():
         return None
@@ -144,7 +144,7 @@ async def test_single_node_returning_none(state_path):
 
 
 async def test_await_handle_without_wait_all(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def quick():
         return "x"
@@ -154,7 +154,7 @@ async def test_await_handle_without_wait_all(state_path):
 
 
 async def test_chain_passes_parent_result_positional(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def head():
         return 7
@@ -169,7 +169,7 @@ async def test_chain_passes_parent_result_positional(state_path):
 
 
 async def test_chain_passes_parent_result_kwarg(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def head():
         return 7
@@ -184,7 +184,7 @@ async def test_chain_passes_parent_result_kwarg(state_path):
 
 
 async def test_multi_parent(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def src(n):
         return n

@@ -6,7 +6,7 @@ from taskline import Flow
 
 
 async def test_nodes_run_in_submit_order(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
     log = []
 
     async def step(label):
@@ -20,7 +20,7 @@ async def test_nodes_run_in_submit_order(state_path):
 
 
 async def test_serial_even_with_uneven_sleeps(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
     log = []
 
     async def slow(label, delay):
@@ -37,7 +37,7 @@ async def test_serial_even_with_uneven_sleeps(state_path):
 
 
 async def test_only_one_node_running_at_a_time(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
     concurrent = 0
     max_concurrent = 0
 

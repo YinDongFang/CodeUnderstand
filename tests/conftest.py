@@ -3,8 +3,6 @@ import pytest
 
 
 @pytest.fixture
-def state_path(tmp_path, monkeypatch):
-    """把 TASKLINE_STATE_PATH 指向一个 tmp 文件，返回该 Path。"""
-    p = tmp_path / "state.json"
-    monkeypatch.setenv("TASKLINE_STATE_PATH", str(p))
-    return p
+def state_path(tmp_path):
+    """返回一个 tmp 文件路径，作为 Flow(state_path=...) 参数传入。"""
+    return tmp_path / "state.json"

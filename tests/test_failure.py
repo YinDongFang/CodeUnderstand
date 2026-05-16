@@ -7,7 +7,7 @@ from taskline import Flow
 
 
 async def test_node_exception_propagates_through_wait_all(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def bad():
         raise ValueError("kaboom")
@@ -18,7 +18,7 @@ async def test_node_exception_propagates_through_wait_all(state_path):
 
 
 async def test_exception_is_not_wrapped(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     class MyError(Exception):
         pass
@@ -34,7 +34,7 @@ async def test_exception_is_not_wrapped(state_path):
 async def test_done_nodes_persisted_before_crash(state_path):
     import json
 
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def ok():
         return "saved"
@@ -53,7 +53,7 @@ async def test_done_nodes_persisted_before_crash(state_path):
 
 
 async def test_pending_handle_await_does_not_hang_on_crash(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def bad():
         raise ValueError("boom")
@@ -73,7 +73,7 @@ async def test_pending_handle_await_does_not_hang_on_crash(state_path):
 
 
 async def test_non_json_serializable_result_crashes(state_path):
-    flow = Flow()
+    flow = Flow(state_path)
 
     async def returns_unserializable():
         return object()   # 非 JSON 可序列化
