@@ -1,5 +1,18 @@
-/projects
-/agent-**
-/loop_logs/
-/logs
-/tmp
+.claude/
+
+# Python 构建/缓存产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+
+# 编辑器
+.vscode/
+.idea/
+
+# taskline 运行时产物：state.json 由 Flow 在调用方指定路径生成；
+# 默认的 ./state.json（conversation.flow 当前占位路径）不入 git。
+/state.json
+state.json.tmp
